@@ -13,6 +13,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 import { formatarCpfCnpj } from "@/lib/validacoes/cpfCnpj";
 import { alternarStatusRepresentante } from "@/app/(dashboard)/representantes/actions";
 
@@ -32,13 +33,14 @@ export function RepresentantesTable({ representantes }: { representantes: Repres
   const [sorting, setSorting] = useState<SortingState>([]);
   const [filtro, setFiltro] = useState("");
   const [processandoId, setProcessandoId] = useState<string | null>(null);
+  const [alvoAlternancia, setAlvoAlternancia] = useState<RepresentanteLinha | null>(null);
 
-  async function alternarStatus(linha: RepresentanteLinha) {
-    const motivo = window.prompt(linha.ativo ? "Motivo da desativação:" : "Motivo da reativação:");
-    if (!motivo) return;
-    setProcessandoId(linha.id);
-    await alternarStatusRepresentante(linha.id, !linha.ativo, motivo);
+  async function confirmarAlternancia(motivo?: string) {
+    if (!alvoAlternancia || !motivo) return;
+    setProcessandoId(alvoAlternancia.id);
+    await alternarStatusRepresentante(alvoAlternancia.id, !alvoAlternancia.ativo, motivo);
     setProcessandoId(null);
+    setAlvoAlternancia(null);
     router.refresh();
   }
 
@@ -65,7 +67,7 @@ export function RepresentantesTable({ representantes }: { representantes: Repres
           <button
             type="button"
             disabled={processandoId === info.row.original.id}
-            onClick={() => alternarStatus(info.row.original)}
+            onClick={() => setAlvoAlternancia(info.row.original)}
             className="text-neutral-600 underline hover:text-neutral-900 disabled:opacity-50 dark:text-neutral-400 dark:hover:text-neutral-100"
           >
             {info.row.original.ativo ? "Desativar" : "Reativar"}
@@ -136,6 +138,16 @@ export function RepresentantesTable({ representantes }: { representantes: Repres
           </tbody>
         </table>
       </div>
+
+      <ConfirmModal
+        aberto={alvoAlternancia !== null}
+        titulo={alvoAlternancia?.ativo ? "Desativar representante" : "Reativar representante"}
+        mensagem={`${alvoAlternancia?.ativo ? "Desativar" : "Reativar"} ${alvoAlternancia?.nome}? Isso não afeta apurações já calculadas.`}
+        pedirMotivo
+        confirmando={processandoId === alvoAlternancia?.id}
+        onConfirmar={confirmarAlternancia}
+        onCancelar={() => setAlvoAlternancia(null)}
+      />
     </div>
   );
 }
