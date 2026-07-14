@@ -1,25 +1,11 @@
-import { auth, signOut } from "@/lib/auth/config";
-
-export default async function DashboardPage() {
-  const sessao = await auth();
-
+export default function DashboardPage() {
   return (
-    <main className="flex min-h-screen flex-col gap-4 p-8">
-      <h1 className="text-xl font-semibold">Dashboard</h1>
+    <div className="flex flex-col gap-2">
+      <h1 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100">Dashboard</h1>
       <p className="text-sm text-neutral-500">
-        Logado como <strong>{sessao?.user?.name}</strong> ({sessao?.user?.email}) — perfil{" "}
-        <strong>{sessao?.user?.perfil}</strong>
+        Em construção — os indicadores (Prompt 4) entram depois que os módulos de Representantes, Contratos e Vendas
+        tiverem dados reais.
       </p>
-      <form
-        action={async () => {
-          "use server";
-          await signOut({ redirectTo: "/login" });
-        }}
-      >
-        <button type="submit" className="w-fit rounded-md border border-neutral-300 px-3 py-1.5 text-sm">
-          Sair
-        </button>
-      </form>
-    </main>
+    </div>
   );
 }

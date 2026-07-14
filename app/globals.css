@@ -24,3 +24,31 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.input {
+  border-radius: 0.375rem;
+  border: 1px solid #d4d4d4;
+  background: white;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: #171717;
+  outline: none;
+}
+.input:focus {
+  border-color: #171717;
+}
+@media (prefers-color-scheme: dark) {
+  .input {
+    border-color: #404040;
+    background: #0a0a0a;
+    color: #ededed;
+  }
+  .input:focus {
+    border-color: #ededed;
+  }
+}
+
+/* Colunas numéricas alinhadas — Prompt 1, Parte A, Seção 8.1 */
+.numerico {
+  font-variant-numeric: tabular-nums;
+}
