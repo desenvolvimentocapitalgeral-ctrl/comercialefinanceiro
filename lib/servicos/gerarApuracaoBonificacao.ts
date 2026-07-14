@@ -38,17 +38,15 @@ export async function calcularApuracaoBonificacao(
   let valorBonificacao = 0;
 
   if (regra.tipoMeta === "QUANTIDADE_DOSES") {
+    // Meta em doses conta por VENDA/FATURAMENTO — nunca por recebimento
+    // (confirmado com o usuário): a dose entra na meta do ciclo assim que a
+    // venda é lançada, independente de a parcela já ter sido paga. Isso é
+    // diferente da comissão (que segue RECEBIMENTO) e do baseCiclo desta
+    // regra, que só se aplica ao motor de meta em valor de faturamento
+    // abaixo — regra.baseCiclo é ignorado aqui de propósito.
     const vendasNoCiclo = vendas
-      .map((v) => {
-        const valorRecebidoNoCiclo =
-          regra.baseCiclo === "RECEBIMENTO"
-            ? v.parcelas.flatMap((p) => p.baixas).filter((b) => b.cicloId === cicloId).reduce((acc, b) => acc + Number(b.valorRecebido), 0)
-            : v.cicloId === cicloId
-              ? Number(v.valorTotal)
-              : 0;
-        return { vendaId: v.id, dataValidacao: v.dataVenda, doses: v.dosesVendidas ?? 0, valorRecebido: valorRecebidoNoCiclo };
-      })
-      .filter((v) => v.valorRecebido > 0);
+      .filter((v) => v.cicloId === cicloId)
+      .map((v) => ({ vendaId: v.id, dataValidacao: v.dataVenda, doses: v.dosesVendidas ?? 0, valorRecebido: Number(v.valorTotal) }));
 
     metaValor = regra.metaQuantidadeDoses ?? 0;
     const resultado = calcularBonificacaoMetaDoses({
