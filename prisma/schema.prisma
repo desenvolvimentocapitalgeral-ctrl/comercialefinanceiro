@@ -1,0 +1,649 @@
+// Schema consolidado — ver docs/especificacao-completa.md (Prompts 1-4)
+// Motor de cálculo é polimórfico (RegraBonificacao.tipoCalculo) porque os
+// contratos reais da empresa usam 6 fórmulas distintas de comissão/bonificação,
+// não um percentual único — ver docs/especificacao-completa.md, Prompt 2 Parte A.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum PerfilUsuario {
+  ADMIN
+  FINANCEIRO
+  REPRESENTANTE
+}
+
+enum StatusContrato {
+  ATIVO
+  ENCERRADO
+  RESCISAO_PENDENTE_FORMALIZACAO
+  SEM_TABELA_COMISSAO
+}
+
+enum StatusAssinaturaContrato {
+  COMPLETA
+  PENDENTE_ASSINATURA_CONTRATADA
+  PENDENTE_ASSINATURA_CONTRATANTE
+}
+
+enum MomentoApuracaoComissao {
+  FATURAMENTO
+  RECEBIMENTO
+}
+
+enum TipoMetaBonificacao {
+  QUANTIDADE_DOSES
+  VALOR_FATURAMENTO
+}
+
+enum BaseCicloBonificacao {
+  FATURAMENTO
+  RECEBIMENTO
+}
+
+enum StatusParcela {
+  PENDENTE
+  RECEBIDA
+  RECEBIDA_PARCIAL
+  CANCELADA
+  RENEGOCIADA
+}
+
+enum StatusApuracao {
+  PENDENTE
+  APROVADA
+  PAGA
+  CANCELADA
+  BLOQUEADA_DADO_MANUAL_FALTANTE
+}
+
+enum StatusImportacao {
+  PROCESSANDO
+  CONCLUIDA
+  CONCLUIDA_COM_ERROS
+  FALHOU
+}
+
+enum TipoImportacao {
+  PRODUTOS
+  CLIENTES
+  CONTAS_A_RECEBER
+}
+
+enum TipoPagamento {
+  REGULAR
+  ADIANTAMENTO
+}
+
+// ============================================================
+// EMPRESA / USUÁRIOS / REPRESENTANTES
+// ============================================================
+
+model Empresa {
+  id             String   @id @default(cuid())
+  razaoSocial    String
+  nomeFantasia   String
+  cnpj           String   @unique
+  diaInicioCiclo Int      @default(11)
+  diaFimCiclo    Int      @default(10)
+  criadoEm       DateTime @default(now())
+  atualizadoEm   DateTime @updatedAt
+
+  usuarios           Usuario[]
+  representantes      Representante[]
+  produtos            Produto[]
+  clientes            Cliente[]
+  vendas              Venda[]
+  campanhas           Campanha[]
+  politicasComerciais PoliticaComercial[]
+  importacoes         ImportacaoArquivo[]
+
+  @@map("empresas")
+}
+
+model Usuario {
+  id           String        @id @default(cuid())
+  empresaId    String
+  empresa      Empresa       @relation(fields: [empresaId], references: [id])
+  nome         String
+  email        String        @unique
+  senhaHash    String
+  perfil       PerfilUsuario
+  ativo        Boolean       @default(true)
+  criadoEm     DateTime      @default(now())
+  atualizadoEm DateTime      @updatedAt
+
+  representante Representante?
+
+  @@map("usuarios")
+  @@index([empresaId])
+}
+
+model Representante {
+  id          String   @id @default(cuid())
+  empresaId   String
+  empresa     Empresa  @relation(fields: [empresaId], references: [id])
+  usuarioId   String?  @unique
+  usuario     Usuario? @relation(fields: [usuarioId], references: [id])
+  nome        String
+  cpfCnpj     String   @unique
+  email       String?
+  telefone    String?
+  ativo       Boolean  @default(true)
+  observacoes String?
+  criadoEm    DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  contratos      Contrato[]
+  vendas         Venda[]
+  aliases        RepresentanteAlias[]
+  dadosBancarios DadosBancariosRepresentante?
+  pagamentos     Pagamento[]
+
+  @@map("representantes")
+  @@index([empresaId])
+}
+
+// Grafias divergentes do nome do representante entre os relatórios do ERP
+// (campo "Vendedor" no export de Contas a Receber, por ex.) — ver de-para.
+model RepresentanteAlias {
+  id              String   @id @default(cuid())
+  representanteId String
+  representante   Representante @relation(fields: [representanteId], references: [id])
+  nomeOrigem      String
+  origem          String
+  criadoEm        DateTime @default(now())
+
+  @@map("representante_aliases")
+  @@unique([nomeOrigem, origem])
+  @@index([representanteId])
+}
+
+model DadosBancariosRepresentante {
+  id                  String        @id @default(cuid())
+  representanteId     String        @unique
+  representante       Representante @relation(fields: [representanteId], references: [id])
+  titularDivergente   Boolean       @default(false)
+  nomeTitular         String
+  cpfCnpjTitular      String
+  banco               String
+  agencia             String
+  conta               String
+  chavePix            String?
+  anexoAutorizacaoUrl String?
+  atualizadoEm        DateTime      @updatedAt
+
+  @@map("dados_bancarios_representante")
+}
+
+// ============================================================
+// POLÍTICA COMERCIAL (regra corporativa compartilhada entre contratos)
+// ============================================================
+
+model PoliticaComercial {
+  id                     String   @id @default(cuid())
+  empresaId              String
+  empresa                Empresa  @relation(fields: [empresaId], references: [id])
+  versao                 String
+  tipoCalculo            String   // DESC_POL1 | DESC_POL2 | POLV3_LEGACY
+  vigenciaCicloInicio    String   // cicloId AAAA-MM — nunca retroage
+  bonusFixoValor         Decimal? @db.Decimal(14, 2)
+  faturamentoMinimoBonus Decimal? @db.Decimal(14, 2)
+  arquivoOriginalUrl     String?
+  criadoEm               DateTime @default(now())
+
+  tabelasDesconto TabelaDescontoComissao[]
+  contratos       Contrato[]
+
+  @@map("politicas_comerciais")
+  @@unique([tipoCalculo, versao])
+  @@index([empresaId, vigenciaCicloInicio])
+}
+
+model TabelaDescontoComissao {
+  id                  String            @id @default(cuid())
+  politicaComercialId String
+  politicaComercial   PoliticaComercial @relation(fields: [politicaComercialId], references: [id])
+  descontoMinimo      Decimal           @db.Decimal(10, 2)
+  descontoMaximo      Decimal           @db.Decimal(10, 2)
+  percentualComissao  Decimal           @db.Decimal(6, 3)
+
+  @@map("tabelas_desconto_comissao")
+  @@index([politicaComercialId])
+}
+
+// ============================================================
+// CONTRATO E REGRAS (versionadas por ciclo, não por data corrida)
+// ============================================================
+
+model Contrato {
+  id                  String                    @id @default(cuid())
+  representanteId     String
+  representante       Representante             @relation(fields: [representanteId], references: [id])
+  politicaComercialId String?
+  politicaComercial   PoliticaComercial?        @relation(fields: [politicaComercialId], references: [id])
+  numero              String?
+  vigenciaInicio      DateTime
+  vigenciaFim         DateTime?
+  status              StatusContrato            @default(ATIVO)
+  statusAssinatura    StatusAssinaturaContrato  @default(PENDENTE_ASSINATURA_CONTRATADA)
+  multaConfidencialidadeMultiplicador Decimal?   @db.Decimal(5, 2) // ex: 3.00 = 3x último pagamento
+  multaNaoConcorrenciaMultiplicador   Decimal?   @db.Decimal(5, 2)
+  multaDescumprimentoPercentual       Decimal?   @db.Decimal(5, 2) // ex: 20.00 = 20% da última NF
+  arquivoOriginalUrl  String?
+  resumoIA            String?
+  clausulasDuvidosas  Json?
+  criadoEm            DateTime                  @default(now())
+  atualizadoEm        DateTime                  @updatedAt
+
+  regrasComissao    RegraComissao[]
+  regrasBonificacao RegraBonificacao[]
+  vendas            Venda[]
+
+  @@map("contratos")
+  @@index([representanteId, vigenciaInicio])
+}
+
+model RegraComissao {
+  id                 String                   @id @default(cuid())
+  contratoId         String
+  contrato           Contrato                 @relation(fields: [contratoId], references: [id])
+  tipoCalculo        String                   // DESC_POL1 | DESC_POL2 | META | POLV3_LEGACY | FIXO | SEMTAB
+  percentual         Decimal?                 @db.Decimal(6, 3) // usado quando o motor é percentual único (ex: FIXO)
+  momentoApuracao    MomentoApuracaoComissao  @default(RECEBIMENTO)
+  aplicaSobre        String?                  // categoria de produto, ou null = todos
+  condicoesEspeciais String?
+  vigenciaCicloInicio String                  // cicloId — resolução de regra é por ciclo, nunca por data corrida
+  criadoEm           DateTime                 @default(now())
+
+  @@map("regras_comissao")
+  @@index([contratoId, vigenciaCicloInicio])
+}
+
+model RegraBonificacao {
+  id                   String               @id @default(cuid())
+  contratoId           String
+  contrato             Contrato             @relation(fields: [contratoId], references: [id])
+  tipoCalculo          String               // DESC_POL1 | DESC_POL2 | META | POLV3_LEGACY | FIXO | SEMTAB
+  tipoMeta             TipoMetaBonificacao
+  metaQuantidadeDoses  Int?                 // preenchido quando tipoMeta = QUANTIDADE_DOSES
+  metaValorFaturamento Decimal?             @db.Decimal(14, 2) // preenchido quando tipoMeta = VALOR_FATURAMENTO
+  baseCiclo            BaseCicloBonificacao @default(FATURAMENTO)
+  bonusFixoValor       Decimal              @db.Decimal(14, 2) // valor pago em R$ — sempre fixo
+  percentualSemMeta    Decimal              @db.Decimal(6, 3)  // % flat se a meta NÃO for batida
+  percentualExcedente  Decimal?             @db.Decimal(6, 3)  // % só sobre o volume acima da meta
+  faixasEscalonadas    Json?                // usado por variantes escalonadas: [{atingimentoMinimo, percentual}]
+  condicoesPerda       String?
+  prorateaPrimeiroCiclo Boolean             @default(false)
+  vigenciaCicloInicio  String
+  criadoEm             DateTime             @default(now())
+
+  apuracoes ApuracaoBonificacao[]
+
+  @@map("regras_bonificacao")
+  @@index([contratoId, vigenciaCicloInicio])
+}
+
+// ============================================================
+// PRODUTOS
+// ============================================================
+
+model Produto {
+  id            String   @id @default(cuid())
+  empresaId     String
+  empresa       Empresa  @relation(fields: [empresaId], references: [id])
+  nomePadrao    String
+  codigoInterno String   @unique
+  precoTabela   Decimal  @db.Decimal(10, 2)
+  ranking       Int?
+  linhaGenetica String?
+  pedigree      Json?
+  categoria     String?
+  ativo         Boolean  @default(true)
+  criadoEm      DateTime @default(now())
+
+  historicoPrecos ProdutoHistoricoPreco[]
+  aliases         ProdutoAlias[]
+  vendas          Venda[]
+
+  @@map("produtos")
+  @@index([empresaId])
+}
+
+model ProdutoHistoricoPreco {
+  id             String    @id @default(cuid())
+  produtoId      String
+  produto        Produto   @relation(fields: [produtoId], references: [id])
+  precoTabela    Decimal   @db.Decimal(10, 2)
+  vigenciaInicio DateTime
+  vigenciaFim    DateTime?
+  criadoEm       DateTime  @default(now())
+
+  @@map("produto_historico_preco")
+  @@index([produtoId, vigenciaInicio])
+}
+
+model ProdutoAlias {
+  id         String   @id @default(cuid())
+  produtoId  String
+  produto    Produto  @relation(fields: [produtoId], references: [id])
+  nomeOrigem String
+  origem     String
+  criadoEm   DateTime @default(now())
+
+  @@map("produto_aliases")
+  @@unique([nomeOrigem, origem])
+  @@index([produtoId])
+}
+
+// ============================================================
+// CLIENTES
+// ============================================================
+
+model Cliente {
+  id         String   @id @default(cuid())
+  empresaId  String
+  empresa    Empresa  @relation(fields: [empresaId], references: [id])
+  nomePadrao String
+  cpfCnpj    String?  @unique
+  ativo      Boolean  @default(true)
+  criadoEm   DateTime @default(now())
+
+  aliases ClienteAlias[]
+  vendas  Venda[]
+
+  @@map("clientes")
+  @@index([empresaId])
+}
+
+model ClienteAlias {
+  id         String   @id @default(cuid())
+  clienteId  String
+  cliente    Cliente  @relation(fields: [clienteId], references: [id])
+  nomeOrigem String
+  origem     String
+  criadoEm   DateTime @default(now())
+
+  @@map("cliente_aliases")
+  @@unique([nomeOrigem, origem])
+  @@index([clienteId])
+}
+
+// ============================================================
+// CAMPANHAS
+// ============================================================
+
+model Campanha {
+  id                         String   @id @default(cuid())
+  empresaId                  String
+  empresa                    Empresa  @relation(fields: [empresaId], references: [id])
+  nome                       String
+  descricao                  String?
+  dataInicio                 DateTime
+  dataFim                    DateTime
+  percentualComissaoEspecial Decimal? @db.Decimal(6, 3)
+  categoriaProdutoAlvo       String?
+  produtoIdAlvo              String?
+  representanteIdAlvo        String?
+  ativa                      Boolean  @default(true)
+  criadoEm                   DateTime @default(now())
+
+  apuracoesComissao ApuracaoComissao[]
+
+  @@map("campanhas")
+  @@index([empresaId, dataInicio, dataFim])
+}
+
+// ============================================================
+// VENDAS, PARCELAS, BAIXAS
+// ============================================================
+
+model Venda {
+  id                   String   @id @default(cuid())
+  empresaId            String
+  empresa              Empresa  @relation(fields: [empresaId], references: [id])
+  clienteId            String
+  cliente              Cliente  @relation(fields: [clienteId], references: [id])
+  produtoId            String
+  produto              Produto  @relation(fields: [produtoId], references: [id])
+  representanteId      String
+  representante        Representante @relation(fields: [representanteId], references: [id])
+  contratoId           String   // snapshot do contrato vigente na data da venda
+  contrato             Contrato @relation(fields: [contratoId], references: [id])
+  numeroPedido         String?
+  dataVenda            DateTime
+  dataEntregaFisica    DateTime? // separado do recebimento — usado nos 4 cenários de validação de bonificação
+  cicloId              String   // calculado a partir de dataVenda
+  valorTotal           Decimal  @db.Decimal(14, 2)
+  quantidadeParcelas   Int
+  dosesVendidas        Int?     // preenchimento manual — ERP não exporta hoje
+  descontoConcedidoPorDose Decimal? @db.Decimal(10, 2) // preenchimento manual — ERP não exporta hoje
+  origem               String   @default("IMPORTACAO") // "IMPORTACAO" | "MANUAL"
+  vendaAutorizadaExcepcionalmente Boolean @default(false)
+  percentualRessarcimentoRisco    Decimal? @db.Decimal(5, 2)
+  origemImportacaoId   String?
+  criadoEm             DateTime @default(now())
+
+  parcelas Parcela[]
+
+  @@map("vendas")
+  @@index([empresaId, cicloId])
+  @@index([representanteId, cicloId])
+  @@index([clienteId])
+  @@index([produtoId])
+}
+
+model Parcela {
+  id                          String        @id @default(cuid())
+  vendaId                     String
+  venda                       Venda         @relation(fields: [vendaId], references: [id])
+  numeroParcela                Int
+  valorParcela                 Decimal       @db.Decimal(14, 2)
+  dataVencimento               DateTime
+  status                       StatusParcela @default(PENDENTE)
+  parcelaOrigemRenegociacaoId  String?
+  parcelaOrigemRenegociacao    Parcela?      @relation("Renegociacao", fields: [parcelaOrigemRenegociacaoId], references: [id])
+  parcelasGeradas              Parcela[]     @relation("Renegociacao")
+  origemImportacaoId           String?
+  criadoEm                     DateTime      @default(now())
+  atualizadoEm                 DateTime      @updatedAt
+
+  baixas           BaixaParcela[]
+  apuracaoComissao ApuracaoComissao[]
+
+  @@map("parcelas")
+  @@unique([vendaId, numeroParcela])
+  @@index([status])
+}
+
+// Suporta múltiplas baixas parciais sobre a mesma parcela até a quitação total.
+model BaixaParcela {
+  id                  String   @id @default(cuid())
+  parcelaId           String
+  parcela              Parcela  @relation(fields: [parcelaId], references: [id])
+  dataRecebimento      DateTime
+  valorRecebido        Decimal  @db.Decimal(14, 2)
+  cicloId              String   // calculado a partir de dataRecebimento
+  origemImportacaoId   String?
+  criadoEm             DateTime @default(now())
+
+  apuracaoComissao ApuracaoComissao?
+
+  @@map("baixas_parcela")
+  @@index([parcelaId])
+  @@index([cicloId])
+}
+
+// ============================================================
+// APURAÇÃO DE COMISSÃO E BONIFICAÇÃO
+// ============================================================
+
+model ApuracaoComissao {
+  id                 String         @id @default(cuid())
+  parcelaId          String
+  parcela            Parcela        @relation(fields: [parcelaId], references: [id])
+  baixaParcelaId     String?        @unique // null quando momentoApuracao = FATURAMENTO
+  baixaParcela       BaixaParcela?  @relation(fields: [baixaParcelaId], references: [id])
+  representanteId    String
+  regraComissaoId    String
+  campanhaId         String?
+  campanha           Campanha?      @relation(fields: [campanhaId], references: [id])
+  cicloId            String
+  valorBase          Decimal        @db.Decimal(14, 2)
+  percentualAplicado Decimal        @db.Decimal(6, 3)
+  valorComissao      Decimal        @db.Decimal(14, 2)
+  status             StatusApuracao @default(PENDENTE)
+  motivoBloqueio     String?        // preenchido quando status = BLOQUEADA_DADO_MANUAL_FALTANTE
+  calculadoEm        DateTime       @default(now())
+
+  estornos      EstornoComissao[]
+  pagamentoItens PagamentoItem[]
+
+  @@map("apuracoes_comissao")
+  @@index([representanteId, cicloId])
+  @@index([status])
+}
+
+model EstornoComissao {
+  id                          String   @id @default(cuid())
+  apuracaoComissaoId          String
+  apuracaoComissao            ApuracaoComissao @relation(fields: [apuracaoComissaoId], references: [id])
+  motivo                      String
+  valorEstornado               Decimal  @db.Decimal(14, 2)
+  cicloDoEstorno               String
+  descontarDeProximoPagamento  Boolean  @default(true)
+  compensado                   Boolean  @default(false)
+  criadoPorUsuarioId           String
+  criadoEm                     DateTime @default(now())
+
+  @@map("estornos_comissao")
+  @@index([apuracaoComissaoId])
+}
+
+model ApuracaoBonificacao {
+  id                    String            @id @default(cuid())
+  representanteId       String
+  contratoId            String
+  regraBonificacaoId    String
+  regraBonificacao      RegraBonificacao  @relation(fields: [regraBonificacaoId], references: [id])
+  cicloId               String
+  valorApurado          Decimal           @db.Decimal(14, 2)
+  dosesApuradas         Int?
+  metaValor             Decimal           @db.Decimal(14, 2) // meta convertida para referência numérica (doses ou R$)
+  percentualAtingimento Decimal           @db.Decimal(6, 2)
+  bateuMeta             Boolean
+  motivoPerda           String?           // preenchido quando condicoesPerda zera o bônus mesmo com meta numérica batida
+  valorBonificacao      Decimal           @db.Decimal(14, 2)
+  status                StatusApuracao    @default(PENDENTE)
+  calculadoEm           DateTime          @default(now())
+
+  ajustes        AjusteBonificacao[]
+  pagamentoItens PagamentoItem[]
+
+  @@map("apuracoes_bonificacao")
+  @@unique([representanteId, regraBonificacaoId, cicloId])
+  @@index([representanteId, cicloId])
+  @@index([status])
+}
+
+model AjusteBonificacao {
+  id                     String              @id @default(cuid())
+  apuracaoBonificacaoId  String
+  apuracaoBonificacao    ApuracaoBonificacao @relation(fields: [apuracaoBonificacaoId], references: [id])
+  motivo                 String
+  valorAjuste            Decimal             @db.Decimal(14, 2) // positivo ou negativo
+  criadoPorUsuarioId     String
+  criadoEm               DateTime            @default(now())
+
+  @@map("ajustes_bonificacao")
+  @@index([apuracaoBonificacaoId])
+}
+
+// ============================================================
+// PAGAMENTOS
+// ============================================================
+
+model Pagamento {
+  id                   String        @id @default(cuid())
+  representanteId      String
+  representante        Representante @relation(fields: [representanteId], references: [id])
+  tipo                 TipoPagamento @default(REGULAR)
+  dataPagamento         DateTime
+  valorTotal            Decimal       @db.Decimal(14, 2)
+  comprovanteUrl        String?
+  reciboUrl             String?
+  assinaturaConfirmadaEm DateTime?
+  assinaturaIp           String?
+  aprovadoPorUsuarioId   String
+  criadoEm               DateTime      @default(now())
+
+  itens PagamentoItem[]
+
+  @@map("pagamentos")
+  @@index([representanteId])
+}
+
+model PagamentoItem {
+  id                    String    @id @default(cuid())
+  pagamentoId           String
+  pagamento             Pagamento @relation(fields: [pagamentoId], references: [id])
+  apuracaoComissaoId    String?
+  apuracaoComissao      ApuracaoComissao? @relation(fields: [apuracaoComissaoId], references: [id])
+  apuracaoBonificacaoId String?
+  apuracaoBonificacao   ApuracaoBonificacao? @relation(fields: [apuracaoBonificacaoId], references: [id])
+  valor                 Decimal   @db.Decimal(14, 2)
+  valorPago             Decimal   @db.Decimal(14, 2) // suporta pagamento parcial de uma apuração
+
+  @@map("pagamento_itens")
+  @@index([pagamentoId])
+}
+
+// ============================================================
+// AUDITORIA E IMPORTAÇÃO
+// ============================================================
+
+// INSERT-only — reforçar também a nível de permissão de banco (sem UPDATE/DELETE
+// para o usuário de aplicação nesta tabela).
+model LogAuditoria {
+  id            String   @id @default(cuid())
+  entidade      String
+  entidadeId    String
+  acao          String
+  valorAnterior Json?
+  valorNovo     Json?
+  usuarioId     String
+  motivo        String?
+  criadoEm      DateTime @default(now())
+
+  @@map("logs_auditoria")
+  @@index([entidade, entidadeId])
+  @@index([usuarioId])
+}
+
+model ImportacaoArquivo {
+  id                String           @id @default(cuid())
+  empresaId         String
+  empresa           Empresa          @relation(fields: [empresaId], references: [id])
+  tipo              TipoImportacao
+  nomeArquivo       String
+  urlArquivo        String
+  usuarioId         String
+  status            StatusImportacao @default(PROCESSANDO)
+  linhasProcessadas Int              @default(0)
+  linhasComErro     Int              @default(0)
+  logErros          Json?
+  criadoEm          DateTime         @default(now())
+  concluidoEm       DateTime?
+
+  @@map("importacoes_arquivo")
+  @@index([empresaId, tipo, criadoEm])
+}
