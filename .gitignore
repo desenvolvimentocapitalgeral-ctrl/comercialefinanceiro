@@ -34,6 +34,10 @@ yarn-error.log*
 .env*
 !.env.example
 
+# dados reais de negócio (nomes, CPF/CNPJ, condições contratuais) — NUNCA versionar,
+# ficam só no banco de dados privado, extraídos aqui apenas como staging local para import
+/data/private/
+
 # vercel
 .vercel
 
