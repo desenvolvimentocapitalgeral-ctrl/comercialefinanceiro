@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { RegistrarRecebimentoModal } from "@/components/formularios/RegistrarRecebimentoModal";
+import { RenegociarParcelaModal } from "@/components/formularios/RenegociarParcelaModal";
 
 const STATUS_LABEL: Record<string, { label: string; cor: "verde" | "ambar" | "vermelho" | "neutro" }> = {
   PENDENTE: { label: "Pendente", cor: "ambar" },
@@ -26,7 +27,9 @@ export interface ParcelaLinha {
 
 export function ParcelasTable({ parcelas }: { parcelas: ParcelaLinha[] }) {
   const [modalParcelaId, setModalParcelaId] = useState<string | null>(null);
+  const [modalRenegociacaoId, setModalRenegociacaoId] = useState<string | null>(null);
   const parcelaSelecionada = parcelas.find((p) => p.id === modalParcelaId);
+  const parcelaEmRenegociacao = parcelas.find((p) => p.id === modalRenegociacaoId);
 
   if (parcelas.length === 0) {
     return (
@@ -71,13 +74,22 @@ export function ParcelasTable({ parcelas }: { parcelas: ParcelaLinha[] }) {
               </td>
               <td className="px-4 py-2 text-sm">
                 {p.saldoEmAberto > 0 && p.status !== "CANCELADA" && p.status !== "RENEGOCIADA" ? (
-                  <button
-                    type="button"
-                    onClick={() => setModalParcelaId(p.id)}
-                    className="text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
-                  >
-                    Registrar recebimento
-                  </button>
+                  <div className="flex flex-col items-start gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setModalParcelaId(p.id)}
+                      className="text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                    >
+                      Registrar recebimento
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setModalRenegociacaoId(p.id)}
+                      className="text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                    >
+                      Renegociar
+                    </button>
+                  </div>
                 ) : (
                   "—"
                 )}
@@ -92,6 +104,14 @@ export function ParcelasTable({ parcelas }: { parcelas: ParcelaLinha[] }) {
           parcelaId={parcelaSelecionada.id}
           saldoEmAberto={parcelaSelecionada.saldoEmAberto}
           onFechar={() => setModalParcelaId(null)}
+        />
+      )}
+
+      {parcelaEmRenegociacao && (
+        <RenegociarParcelaModal
+          parcelaId={parcelaEmRenegociacao.id}
+          saldoEmAberto={parcelaEmRenegociacao.saldoEmAberto}
+          onFechar={() => setModalRenegociacaoId(null)}
         />
       )}
     </div>
