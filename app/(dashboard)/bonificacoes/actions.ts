@@ -12,6 +12,7 @@ import {
   registrarCompensacoesAdiantamento,
   type CompensacaoSolicitada,
 } from "@/lib/servicos/adiantamento";
+import { enfileirarNotificacao } from "@/lib/notificacoes/enfileirar";
 
 export type ResultadoAcao = { sucesso: true } | { sucesso: false; erro: string; codigo: string };
 
@@ -127,6 +128,17 @@ export async function gerarPagamentoBonificacao(
   });
 
   if (erroTransacao) return erroTransacao;
+
+  const representante = await prisma.representante.findUnique({ where: { id: representanteId }, select: { nome: true, email: true } });
+  if (representante?.email) {
+    await enfileirarNotificacao(representante.email, "PAGAMENTO_GERADO", {
+      representanteNome: representante.nome,
+      tipo: "bonificação",
+      valorTotal: valorBruto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+      dataPagamento: dataPagamento.toLocaleDateString("pt-BR"),
+      quantidadeApuracoes: String(apuracaoIds.length),
+    });
+  }
 
   revalidatePath("/bonificacoes");
   return { sucesso: true };

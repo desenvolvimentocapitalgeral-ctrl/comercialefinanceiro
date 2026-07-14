@@ -15,6 +15,7 @@ import {
   type SaldoAdiantamento,
   type CompensacaoSolicitada,
 } from "@/lib/servicos/adiantamento";
+import { enfileirarNotificacao } from "@/lib/notificacoes/enfileirar";
 
 export type ResultadoAcao = { sucesso: true } | { sucesso: false; erro: string; codigo: string };
 
@@ -141,6 +142,19 @@ export async function gerarPagamento(
 
   if (erroTransacao) return erroTransacao;
 
+  // Notificação (Prompt 1, §7): nunca bloqueia a ação — pagamento já está
+  // gravado e confirmado ao usuário antes desta chamada, que só enfileira.
+  const representante = await prisma.representante.findUnique({ where: { id: representanteId }, select: { nome: true, email: true } });
+  if (representante?.email) {
+    await enfileirarNotificacao(representante.email, "PAGAMENTO_GERADO", {
+      representanteNome: representante.nome,
+      tipo: "comissão",
+      valorTotal: valorBruto.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+      dataPagamento: dataPagamento.toLocaleDateString("pt-BR"),
+      quantidadeApuracoes: String(apuracaoIds.length),
+    });
+  }
+
   revalidatePath("/comissoes");
   return { sucesso: true };
 }
@@ -159,7 +173,17 @@ export async function novoAdiantamento(representanteId: string, valor: number, d
 
   const resultado = await criarAdiantamento(representanteId, valor, parseDataLocal(dataPagamentoStr), sessao.user.id, motivo);
 
-  if (resultado.sucesso) revalidatePath("/comissoes/adiantamentos");
+  if (resultado.sucesso) {
+    revalidatePath("/comissoes/adiantamentos");
+    const representante = await prisma.representante.findUnique({ where: { id: representanteId }, select: { nome: true, email: true } });
+    if (representante?.email) {
+      await enfileirarNotificacao(representante.email, "ADIANTAMENTO_CRIADO", {
+        representanteNome: representante.nome,
+        valor: valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+        dataPagamento: parseDataLocal(dataPagamentoStr).toLocaleDateString("pt-BR"),
+      });
+    }
+  }
   return resultado;
 }
 

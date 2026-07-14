@@ -670,3 +670,27 @@ model ImportacaoArquivo {
   @@map("importacoes_arquivo")
   @@index([empresaId, tipo, criadoEm])
 }
+
+enum StatusNotificacao {
+  PENDENTE
+  ENVIADA
+  FALHA
+}
+
+// Fila de e-mail transacional assíncrono (Prompt 1, §7): nunca bloqueia a
+// ação de negócio que a originou — a ação só grava esta linha, o envio real
+// acontece à parte, com retry em caso de falha.
+model Notificacao {
+  id           String            @id @default(cuid())
+  destinatario String
+  template     String // chave do template em lib/notificacoes/templates.ts
+  variaveis    Json // valores para substituição no template
+  status       StatusNotificacao @default(PENDENTE)
+  tentativas   Int               @default(0)
+  ultimoErro   String?
+  criadoEm     DateTime          @default(now())
+  enviadaEm    DateTime?
+
+  @@map("notificacoes")
+  @@index([status, criadoEm])
+}
