@@ -27,6 +27,7 @@ function subtrairUmDia(data: Date): Date {
 export async function criarContrato(
   dadosBrutos: ContratoFormValues,
   confirmarEncerramentoAnterior = false,
+  metadadosIA?: { resumoIA?: string; clausulasDuvidosas?: string[] },
 ): Promise<ResultadoContrato> {
   const sessao = await exigirSessaoAdmin();
   if (!sessao) return { sucesso: false, erro: "Apenas ADMIN pode criar/editar contratos.", codigo: "SEM_PERMISSAO" };
@@ -94,6 +95,8 @@ export async function criarContrato(
         multaConfidencialidadeMultiplicador: dados.multaConfidencialidadeMultiplicador ?? null,
         multaNaoConcorrenciaMultiplicador: dados.multaNaoConcorrenciaMultiplicador ?? null,
         multaDescumprimentoPercentual: dados.multaDescumprimentoPercentual ?? null,
+        resumoIA: metadadosIA?.resumoIA ?? null,
+        clausulasDuvidosas: metadadosIA?.clausulasDuvidosas && metadadosIA.clausulasDuvidosas.length > 0 ? metadadosIA.clausulasDuvidosas : undefined,
         regrasComissao: {
           create: {
             tipoCalculo: dados.regraComissao.tipoCalculo,

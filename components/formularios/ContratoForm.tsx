@@ -34,7 +34,13 @@ interface RepresentanteOpcao {
   nome: string;
 }
 
-export function ContratoForm({ representantes }: { representantes: RepresentanteOpcao[] }) {
+interface ContratoFormProps {
+  representantes: RepresentanteOpcao[];
+  valoresIniciais?: Partial<ContratoFormValues>;
+  metadadosIA?: { resumoIA?: string; clausulasDuvidosas?: string[] };
+}
+
+export function ContratoForm({ representantes, valoresIniciais, metadadosIA }: ContratoFormProps) {
   const router = useRouter();
   const [erroServidor, setErroServidor] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
@@ -55,6 +61,7 @@ export function ContratoForm({ representantes }: { representantes: Representante
       regraComissao: { tipoCalculo: "DESC_POL1", momentoApuracao: "RECEBIMENTO", aplicaSobre: "", condicoesEspeciais: "" },
       temBonificacao: false,
       regraBonificacao: { tipoCalculo: "DESC_POL1", tipoMeta: "VALOR_FATURAMENTO", baseCiclo: "FATURAMENTO", bonusFixoValor: 0, percentualSemMeta: 0 },
+      ...valoresIniciais,
     },
   });
 
@@ -64,7 +71,7 @@ export function ContratoForm({ representantes }: { representantes: Representante
   async function onSubmit(dados: ContratoFormValues) {
     setErroServidor(null);
     setEnviando(true);
-    const resultado = await criarContrato(dados);
+    const resultado = await criarContrato(dados, false, metadadosIA);
     setEnviando(false);
 
     if (!resultado.sucesso && resultado.codigo === "SOBREPOSICAO_VIGENCIA") {
@@ -84,7 +91,7 @@ export function ContratoForm({ representantes }: { representantes: Representante
   async function confirmarEncerramentoAnterior() {
     if (!sobreposicao) return;
     setEnviando(true);
-    const resultado = await criarContrato(sobreposicao.dados, true);
+    const resultado = await criarContrato(sobreposicao.dados, true, metadadosIA);
     setEnviando(false);
     setSobreposicao(null);
 
