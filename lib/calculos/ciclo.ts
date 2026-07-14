@@ -56,6 +56,13 @@ export function cicloEstaFechado(ciclo: CicloComercial, agora: Date = new Date()
   return isBefore(ciclo.fim, agora);
 }
 
+/** Reconstrói o CicloComercial completo a partir do cicloId "AAAA-MM" — usado para saber se um ciclo já fechou. */
+export function cicloComercialDoId(cicloId: string, diaInicio: number = 11, diaFim: number = 10): CicloComercial {
+  const [ano, mes] = cicloId.split("-").map(Number);
+  const referencia = new Date(ano, mes - 1, diaInicio);
+  return calcularCiclo(referencia, diaInicio, diaFim);
+}
+
 /** Compara dois cicloId no formato AAAA-MM de forma ordenável (string já é ordenável, mas centraliza a regra). */
 export function compararCicloId(a: string, b: string): number {
   return a.localeCompare(b);

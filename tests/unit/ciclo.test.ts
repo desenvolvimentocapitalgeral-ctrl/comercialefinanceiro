@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calcularCiclo, listarCiclosEntre, cicloEstaFechado, resolverVigenciaPorCiclo } from "@/lib/calculos/ciclo";
+import { calcularCiclo, listarCiclosEntre, cicloEstaFechado, cicloComercialDoId, resolverVigenciaPorCiclo } from "@/lib/calculos/ciclo";
 
 describe("calcularCiclo", () => {
   const casos: Array<[string, string]> = [
@@ -51,6 +51,22 @@ describe("cicloEstaFechado", () => {
   it("considera em andamento quando a data atual está dentro do ciclo", () => {
     const ciclo = calcularCiclo(new Date(2026, 2, 15));
     expect(cicloEstaFechado(ciclo, new Date(2026, 2, 20))).toBe(false);
+  });
+});
+
+describe("cicloComercialDoId", () => {
+  it("reconstrói o mesmo ciclo a partir do cicloId gerado por calcularCiclo (round-trip)", () => {
+    const original = calcularCiclo(new Date(2026, 7, 20));
+    const reconstruido = cicloComercialDoId(original.cicloId);
+    expect(reconstruido.cicloId).toBe(original.cicloId);
+    expect(reconstruido.inicio).toEqual(original.inicio);
+    expect(reconstruido.fim).toEqual(original.fim);
+  });
+
+  it("funciona corretamente na virada de ano", () => {
+    const ciclo = cicloComercialDoId("2025-12");
+    expect(ciclo.inicio).toEqual(new Date(2025, 11, 11));
+    expect(ciclo.fim).toEqual(new Date(2026, 0, 10));
   });
 });
 
