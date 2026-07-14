@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { aprovarBonificacoes, gerarPagamentoBonificacao, recalcularBonificacaoCicloAtual } from "@/app/(dashboard)/bonificacoes/actions";
+import { AjusteBonificacaoModal } from "@/components/formularios/AjusteBonificacaoModal";
 
 const STATUS_LABEL: Record<string, { label: string; cor: "verde" | "ambar" | "vermelho" | "neutro" | "azul" }> = {
   PENDENTE: { label: "Pendente", cor: "ambar" },
@@ -40,6 +41,8 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
   const [erro, setErro] = useState<string | null>(null);
   const [modalPagamento, setModalPagamento] = useState(false);
   const [dataPagamento, setDataPagamento] = useState("");
+  const [modalAjusteId, setModalAjusteId] = useState<string | null>(null);
+  const apuracaoEmAjuste = apuracoes.find((a) => a.id === modalAjusteId);
 
   function alternarSelecao(id: string) {
     setSelecionadas((atual) => {
@@ -159,6 +162,7 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Bateu meta?</th>
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Bonificação</th>
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Status</th>
+                <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -193,6 +197,19 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
                     </td>
                     <td className="px-4 py-2">
                       <StatusBadge label={STATUS_LABEL[a.status].label} cor={STATUS_LABEL[a.status].cor} />
+                    </td>
+                    <td className="px-4 py-2 text-sm">
+                      {a.status === "PAGA" ? (
+                        <button
+                          type="button"
+                          onClick={() => setModalAjusteId(a.id)}
+                          className="text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                        >
+                          Ajustar
+                        </button>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                   </tr>
                 );
@@ -230,6 +247,14 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
             </div>
           </div>
         </div>
+      )}
+
+      {apuracaoEmAjuste && (
+        <AjusteBonificacaoModal
+          apuracaoId={apuracaoEmAjuste.id}
+          valorBonificacao={apuracaoEmAjuste.valorBonificacao}
+          onFechar={() => setModalAjusteId(null)}
+        />
       )}
     </div>
   );

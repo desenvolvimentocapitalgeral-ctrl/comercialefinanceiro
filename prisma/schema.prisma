@@ -562,6 +562,7 @@ model AjusteBonificacao {
   apuracaoBonificacao    ApuracaoBonificacao @relation(fields: [apuracaoBonificacaoId], references: [id])
   motivo                 String
   valorAjuste            Decimal             @db.Decimal(14, 2) // positivo ou negativo
+  compensado             Boolean             @default(false)
   criadoPorUsuarioId     String
   criadoEm               DateTime            @default(now())
 

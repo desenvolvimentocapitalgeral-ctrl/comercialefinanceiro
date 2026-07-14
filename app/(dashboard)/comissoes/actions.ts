@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db/client";
 import { auth } from "@/lib/auth/config";
 import { parseDataLocal } from "@/lib/utils/data";
+import { criarEstornoComissao, type ResultadoEstorno } from "@/lib/servicos/criarEstornoComissao";
+import { aplicarEstornosComissaoPendentes } from "@/lib/servicos/aplicarCompensacoesPendentes";
 
 export type ResultadoAcao = { sucesso: true } | { sucesso: false; erro: string; codigo: string };
 
@@ -69,10 +71,13 @@ export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: st
   }
 
   const representanteId = apuracoes[0].representanteId;
-  const valorTotal = apuracoes.reduce((acc, a) => acc + Number(a.valorComissao), 0);
+  const valorBruto = apuracoes.reduce((acc, a) => acc + Number(a.valorComissao), 0);
   const dataPagamento = parseDataLocal(dataPagamentoStr);
 
   await prisma.$transaction(async (tx) => {
+    const compensacao = await aplicarEstornosComissaoPendentes(tx, representanteId);
+    const valorTotal = Math.max(0, valorBruto - compensacao.totalDeduzido);
+
     const pagamento = await tx.pagamento.create({
       data: {
         representanteId,
@@ -97,7 +102,14 @@ export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: st
         entidade: "Pagamento",
         entidadeId: pagamento.id,
         acao: "CRIACAO",
-        valorNovo: { representanteId, valorTotal, quantidadeApuracoes: apuracaoIds.length },
+        valorNovo: {
+          representanteId,
+          valorBruto,
+          estornosCompensados: compensacao.quantidade,
+          valorDeduzidoPorEstornos: compensacao.totalDeduzido,
+          valorTotal,
+          quantidadeApuracoes: apuracaoIds.length,
+        },
         usuarioId: sessao.user.id,
       },
     });
@@ -105,4 +117,24 @@ export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: st
 
   revalidatePath("/comissoes");
   return { sucesso: true };
+}
+
+/** Estorno de comissão já paga (Prompt 3, §6.4) — deduzido do próximo pagamento regular. */
+export async function estornarComissao(
+  apuracaoComissaoId: string,
+  motivo: string,
+  valorEstornado: number,
+  descontarDeProximoPagamento: boolean,
+): Promise<ResultadoEstorno> {
+  const sessao = await exigirSessaoAdminFinanceiro();
+  if (!sessao) return { sucesso: false, erro: "Sem permissão.", codigo: "SEM_PERMISSAO" };
+
+  if (!motivo || motivo.trim().length === 0) {
+    return { sucesso: false, erro: "Informe o motivo do estorno.", codigo: "MOTIVO_OBRIGATORIO" };
+  }
+
+  const resultado = await criarEstornoComissao(apuracaoComissaoId, motivo, valorEstornado, descontarDeProximoPagamento, sessao.user.id);
+
+  if (resultado.sucesso) revalidatePath("/comissoes");
+  return resultado;
 }

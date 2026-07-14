@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/client";
 import { auth } from "@/lib/auth/config";
 import { calcularCiclo } from "@/lib/calculos/ciclo";
 import { calcularApuracaoBonificacao, type ResultadoApuracaoBonificacao } from "@/lib/servicos/gerarApuracaoBonificacao";
+import { criarAjusteBonificacao, type ResultadoAjuste } from "@/lib/servicos/criarAjusteBonificacao";
+import { aplicarAjustesBonificacaoPendentes } from "@/lib/servicos/aplicarCompensacoesPendentes";
 
 export type ResultadoAcao = { sucesso: true } | { sucesso: false; erro: string; codigo: string };
 
@@ -65,10 +67,13 @@ export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagam
 
   const { parseDataLocal } = await import("@/lib/utils/data");
   const representanteId = apuracoes[0].representanteId;
-  const valorTotal = apuracoes.reduce((acc, a) => acc + Number(a.valorBonificacao), 0);
+  const valorBruto = apuracoes.reduce((acc, a) => acc + Number(a.valorBonificacao), 0);
   const dataPagamento = parseDataLocal(dataPagamentoStr);
 
   await prisma.$transaction(async (tx) => {
+    const compensacao = await aplicarAjustesBonificacaoPendentes(tx, representanteId);
+    const valorTotal = Math.max(0, valorBruto - compensacao.totalDeduzido);
+
     const pagamento = await tx.pagamento.create({
       data: {
         representanteId,
@@ -87,7 +92,15 @@ export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagam
         entidade: "Pagamento",
         entidadeId: pagamento.id,
         acao: "CRIACAO",
-        valorNovo: { representanteId, valorTotal, quantidadeApuracoes: apuracaoIds.length, tipo: "bonificacao" },
+        valorNovo: {
+          representanteId,
+          valorBruto,
+          ajustesCompensados: compensacao.quantidade,
+          valorLiquidoDeAjustes: -compensacao.totalDeduzido,
+          valorTotal,
+          quantidadeApuracoes: apuracaoIds.length,
+          tipo: "bonificacao",
+        },
         usuarioId: sessao.user.id,
       },
     });
@@ -95,4 +108,19 @@ export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagam
 
   revalidatePath("/bonificacoes");
   return { sucesso: true };
+}
+
+/** Ajuste de bonificação já paga (Prompt 3, §6.4) — aplicado no próximo pagamento regular. */
+export async function ajustarBonificacao(apuracaoBonificacaoId: string, motivo: string, valorAjuste: number): Promise<ResultadoAjuste> {
+  const sessao = await exigirSessaoAdminFinanceiro();
+  if (!sessao) return { sucesso: false, erro: "Sem permissão.", codigo: "SEM_PERMISSAO" };
+
+  if (!motivo || motivo.trim().length === 0) {
+    return { sucesso: false, erro: "Informe o motivo do ajuste.", codigo: "MOTIVO_OBRIGATORIO" };
+  }
+
+  const resultado = await criarAjusteBonificacao(apuracaoBonificacaoId, motivo, valorAjuste, sessao.user.id);
+
+  if (resultado.sucesso) revalidatePath("/bonificacoes");
+  return resultado;
 }

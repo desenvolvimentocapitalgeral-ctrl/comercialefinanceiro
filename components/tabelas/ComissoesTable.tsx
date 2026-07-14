@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { aprovarApuracoes, gerarPagamento } from "@/app/(dashboard)/comissoes/actions";
+import { EstornoComissaoModal } from "@/components/formularios/EstornoComissaoModal";
 
 const STATUS_LABEL: Record<string, { label: string; cor: "verde" | "ambar" | "vermelho" | "neutro" | "azul" }> = {
   PENDENTE: { label: "Pendente", cor: "ambar" },
@@ -40,6 +41,8 @@ export function ComissoesTable({ apuracoes }: { apuracoes: ApuracaoLinha[] }) {
   const [erro, setErro] = useState<string | null>(null);
   const [modalPagamento, setModalPagamento] = useState(false);
   const [dataPagamento, setDataPagamento] = useState("");
+  const [modalEstornoId, setModalEstornoId] = useState<string | null>(null);
+  const apuracaoEmEstorno = apuracoes.find((a) => a.id === modalEstornoId);
 
   function alternarSelecao(id: string) {
     setSelecionadas((atual) => {
@@ -125,6 +128,7 @@ export function ComissoesTable({ apuracoes }: { apuracoes: ApuracaoLinha[] }) {
               <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">%</th>
               <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Comissão</th>
               <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Status</th>
+              <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Ações</th>
             </tr>
           </thead>
           <tbody>
@@ -150,6 +154,19 @@ export function ComissoesTable({ apuracoes }: { apuracoes: ApuracaoLinha[] }) {
                   <td className="px-4 py-2">
                     <StatusBadge label={STATUS_LABEL[a.status].label} cor={STATUS_LABEL[a.status].cor} />
                     {a.motivoBloqueio && <p className="mt-1 text-xs text-neutral-500">{MOTIVO_LABEL[a.motivoBloqueio] ?? a.motivoBloqueio}</p>}
+                  </td>
+                  <td className="px-4 py-2 text-sm">
+                    {a.status === "PAGA" ? (
+                      <button
+                        type="button"
+                        onClick={() => setModalEstornoId(a.id)}
+                        className="text-red-600 underline hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                      >
+                        Estornar
+                      </button>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 </tr>
               );
@@ -189,6 +206,14 @@ export function ComissoesTable({ apuracoes }: { apuracoes: ApuracaoLinha[] }) {
             </div>
           </div>
         </div>
+      )}
+
+      {apuracaoEmEstorno && (
+        <EstornoComissaoModal
+          apuracaoId={apuracaoEmEstorno.id}
+          valorComissao={apuracaoEmEstorno.valorComissao}
+          onFechar={() => setModalEstornoId(null)}
+        />
       )}
     </div>
   );
