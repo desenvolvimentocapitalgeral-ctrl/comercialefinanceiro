@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { clienteSchema, type ClienteFormValues } from "@/lib/validacoes/cliente";
 import { criarCliente, atualizarCliente } from "@/app/(dashboard)/clientes/actions";
+import type { CandidatoFuzzy } from "@/lib/depara/resolverEntidade";
 
 interface ClienteFormProps {
   clienteId?: string;
@@ -16,6 +17,7 @@ export function ClienteForm({ clienteId, valoresIniciais }: ClienteFormProps) {
   const router = useRouter();
   const [erroServidor, setErroServidor] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const [possivelDuplicata, setPossivelDuplicata] = useState<{ dados: ClienteFormValues; candidatos: CandidatoFuzzy[] } | null>(null);
   const modoEdicao = Boolean(clienteId);
 
   const {
@@ -32,6 +34,27 @@ export function ClienteForm({ clienteId, valoresIniciais }: ClienteFormProps) {
     setEnviando(true);
     const resultado = clienteId ? await atualizarCliente(clienteId, dados) : await criarCliente(dados);
     setEnviando(false);
+
+    if (!resultado.sucesso && resultado.codigo === "POSSIVEL_DUPLICATA") {
+      setPossivelDuplicata({ dados, candidatos: resultado.candidatos });
+      return;
+    }
+
+    if (!resultado.sucesso) {
+      setErroServidor(resultado.erro);
+      return;
+    }
+
+    router.push("/clientes");
+    router.refresh();
+  }
+
+  async function criarMesmoAssim() {
+    if (!possivelDuplicata) return;
+    setEnviando(true);
+    const resultado = await criarCliente(possivelDuplicata.dados, true);
+    setEnviando(false);
+    setPossivelDuplicata(null);
 
     if (!resultado.sucesso) {
       setErroServidor(resultado.erro);
@@ -61,6 +84,32 @@ export function ClienteForm({ clienteId, valoresIniciais }: ClienteFormProps) {
         <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
           {erroServidor}
         </p>
+      )}
+
+      {possivelDuplicata && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950">
+          <p className="font-medium text-amber-800 dark:text-amber-300">Possível cliente duplicado</p>
+          <ul className="mt-1 flex flex-col gap-0.5 text-amber-700 dark:text-amber-400">
+            {possivelDuplicata.candidatos.map((c) => (
+              <li key={c.entidadeId}>
+                {c.nome} — {Math.round(c.similaridade * 100)}% parecido
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              disabled={enviando}
+              onClick={criarMesmoAssim}
+              className="rounded-md bg-amber-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              É diferente — criar mesmo assim
+            </button>
+            <button type="button" onClick={() => setPossivelDuplicata(null)} className="rounded-md border border-amber-400 px-3 py-1.5 text-xs text-amber-800 dark:text-amber-300">
+              Cancelar, vou verificar
+            </button>
+          </div>
+        </div>
       )}
 
       <div className="flex gap-2">
