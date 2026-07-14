@@ -52,12 +52,19 @@ export async function gerarApuracaoComissao(tx: TransacaoPrisma, baixaParcelaId:
     return;
   }
 
+  const campanha = await resolverCampanhaAtiva(tx, venda.empresaId, venda.representanteId, venda.produtoId, venda.dataVenda);
+  const percentualAplicado = campanha ? Number(campanha.percentualComissaoEspecial) : resultado.percentualAplicado;
+  const valorComissao = campanha
+    ? arredondarValor(Number(baixa.valorRecebido) * (percentualAplicado / 100))
+    : resultado.valorComissao;
+
   await tx.apuracaoComissao.upsert({
     where: { baixaParcelaId: baixa.id },
     update: {
       valorBase: baixa.valorRecebido,
-      percentualAplicado: resultado.percentualAplicado,
-      valorComissao: resultado.valorComissao,
+      percentualAplicado,
+      valorComissao,
+      campanhaId: campanha?.id ?? null,
       status: "PENDENTE",
       cicloId: cicloRecebimento,
     },
@@ -66,10 +73,11 @@ export async function gerarApuracaoComissao(tx: TransacaoPrisma, baixaParcelaId:
       baixaParcelaId: baixa.id,
       representanteId: venda.representanteId,
       regraComissaoId: regraVigente.id,
+      campanhaId: campanha?.id ?? null,
       cicloId: cicloRecebimento,
       valorBase: baixa.valorRecebido,
-      percentualAplicado: resultado.percentualAplicado,
-      valorComissao: resultado.valorComissao,
+      percentualAplicado,
+      valorComissao,
       status: "PENDENTE",
     },
   });
@@ -83,6 +91,38 @@ export async function gerarApuracaoComissao(tx: TransacaoPrisma, baixaParcelaId:
       usuarioId,
     },
   });
+}
+
+/**
+ * Campanha é regra ADITIVA temporária sobre o contrato (nunca substitui a
+ * regra normal, apenas sobrepõe o percentual quando vigente) — Prompt 2,
+ * Parte A §5.5. Vale pela DATA DA VENDA, nunca pela data do recebimento,
+ * mesma "regra de ouro" do contrato. Alvo (produto/representante) é
+ * opcional: null no campo = vale para todos.
+ */
+async function resolverCampanhaAtiva(
+  tx: TransacaoPrisma,
+  empresaId: string,
+  representanteId: string,
+  produtoId: string,
+  dataVenda: Date,
+) {
+  return tx.campanha.findFirst({
+    where: {
+      empresaId,
+      ativa: true,
+      dataInicio: { lte: dataVenda },
+      dataFim: { gte: dataVenda },
+      percentualComissaoEspecial: { not: null },
+      OR: [{ representanteIdAlvo: null }, { representanteIdAlvo: representanteId }],
+      AND: [{ OR: [{ produtoIdAlvo: null }, { produtoIdAlvo: produtoId }] }],
+    },
+    orderBy: { dataInicio: "desc" },
+  });
+}
+
+function arredondarValor(valor: number): number {
+  return Math.round(valor * 100) / 100;
 }
 
 async function calcularViaTabelaDesconto(
