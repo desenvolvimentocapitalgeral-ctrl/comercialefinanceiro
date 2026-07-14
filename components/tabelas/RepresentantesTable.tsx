@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -14,7 +14,9 @@ import {
 } from "@tanstack/react-table";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { ContratoInfoTooltip } from "@/components/ui/ContratoInfoTooltip";
 import { formatarCpfCnpj } from "@/lib/validacoes/cpfCnpj";
+import { tipoContrato } from "@/lib/utils/contrato";
 import { alternarStatusRepresentante } from "@/app/(dashboard)/representantes/actions";
 
 export interface RepresentanteLinha {
@@ -24,16 +26,49 @@ export interface RepresentanteLinha {
   email: string | null;
   ativo: boolean;
   contratoAtivo: boolean;
+  contratoNumero: string | null;
+  contratoVigenciaInicio: string | null; // "AAAA-MM-DD"
+  contratoVigenciaFim: string | null; // "AAAA-MM-DD"
+  contratoStatusAssinatura: string | null;
+  motorComissao: string | null;
+  percentualComissao: string | null;
+  motorBonificacao: string | null;
+  metaBonificacao: string | null;
+  bonusFixoValor: string | null;
+  temComissao: boolean;
+  temBonificacao: boolean;
 }
 
 const columnHelper = createColumnHelper<RepresentanteLinha>();
+
+// Sobreposição do intervalo [de, ate] com a vigência do contrato — mesmo
+// critério usado na listagem de Contratos. Ambos os lados já vêm no formato
+// "AAAA-MM-DD", então a comparação de string lexicográfica é segura.
+function contratoNoPeriodo(r: RepresentanteLinha, de: string, ate: string): boolean {
+  if (!r.contratoVigenciaInicio) return false;
+  if (de && r.contratoVigenciaFim && r.contratoVigenciaFim < de) return false;
+  if (ate && r.contratoVigenciaInicio > ate) return false;
+  return true;
+}
+
+function formatarDataBr(dataIso: string): string {
+  const [ano, mes, dia] = dataIso.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
 
 export function RepresentantesTable({ representantes }: { representantes: RepresentanteLinha[] }) {
   const router = useRouter();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [filtro, setFiltro] = useState("");
+  const [periodoDe, setPeriodoDe] = useState("");
+  const [periodoAte, setPeriodoAte] = useState("");
   const [processandoId, setProcessandoId] = useState<string | null>(null);
   const [alvoAlternancia, setAlvoAlternancia] = useState<RepresentanteLinha | null>(null);
+
+  const dadosFiltradosPorPeriodo = useMemo(() => {
+    if (!periodoDe && !periodoAte) return representantes;
+    return representantes.filter((r) => contratoNoPeriodo(r, periodoDe, periodoAte));
+  }, [representantes, periodoDe, periodoAte]);
 
   async function confirmarAlternancia(motivo?: string) {
     if (!alvoAlternancia || !motivo) return;
@@ -45,12 +80,41 @@ export function RepresentantesTable({ representantes }: { representantes: Repres
   }
 
   const columns = [
-    columnHelper.accessor("nome", { header: "Nome" }),
+    columnHelper.accessor("nome", {
+      header: "Nome",
+      cell: (info) => {
+        const r = info.row.original;
+        if (!r.contratoAtivo) return info.getValue();
+        return (
+          <ContratoInfoTooltip
+            dados={{
+              numero: r.contratoNumero,
+              vigenciaInicio: r.contratoVigenciaInicio ? formatarDataBr(r.contratoVigenciaInicio) : "—",
+              vigenciaFim: r.contratoVigenciaFim ? formatarDataBr(r.contratoVigenciaFim) : null,
+              statusAssinatura: r.contratoStatusAssinatura ?? "—",
+              motorComissao: r.motorComissao,
+              percentualComissao: r.percentualComissao,
+              motorBonificacao: r.motorBonificacao,
+              metaBonificacao: r.metaBonificacao,
+              bonusFixoValor: r.bonusFixoValor,
+            }}
+          >
+            <span className="cursor-help border-b border-dotted border-neutral-400">{r.nome}</span>
+          </ContratoInfoTooltip>
+        );
+      },
+    }),
     columnHelper.accessor("cpfCnpj", { header: "CPF/CNPJ", cell: (info) => <span className="numerico">{formatarCpfCnpj(info.getValue())}</span> }),
     columnHelper.accessor("email", { header: "E-mail", cell: (info) => info.getValue() ?? "—" }),
-    columnHelper.accessor("contratoAtivo", {
-      header: "Contrato ativo",
-      cell: (info) => <StatusBadge label={info.getValue() ? "Sim" : "Não"} cor={info.getValue() ? "verde" : "ambar"} />,
+    columnHelper.display({
+      id: "tipoContrato",
+      header: "Tipo de contrato",
+      cell: (info) => {
+        const r = info.row.original;
+        if (!r.contratoAtivo) return <StatusBadge label="Sem contrato ativo" cor="ambar" />;
+        const tipo = tipoContrato(r.temComissao, r.temBonificacao);
+        return <StatusBadge label={tipo.label} cor={tipo.cor} />;
+      },
     }),
     columnHelper.accessor("ativo", {
       header: "Status",
@@ -78,7 +142,7 @@ export function RepresentantesTable({ representantes }: { representantes: Repres
   ];
 
   const table = useReactTable({
-    data: representantes,
+    data: dadosFiltradosPorPeriodo,
     columns,
     state: { sorting, globalFilter: filtro },
     onSortingChange: setSorting,
@@ -101,12 +165,35 @@ export function RepresentantesTable({ representantes }: { representantes: Repres
 
   return (
     <div className="flex flex-col gap-3">
-      <input
-        value={filtro}
-        onChange={(e) => setFiltro(e.target.value)}
-        placeholder="Buscar por nome ou documento..."
-        className="input max-w-xs"
-      />
+      <div className="flex flex-wrap items-end gap-3">
+        <input
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+          placeholder="Buscar por nome ou documento..."
+          className="input max-w-xs"
+        />
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">Vigência do contrato de</label>
+          <input type="date" value={periodoDe} onChange={(e) => setPeriodoDe(e.target.value)} className="input" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-300">até</label>
+          <input type="date" value={periodoAte} onChange={(e) => setPeriodoAte(e.target.value)} className="input" />
+        </div>
+        {(periodoDe || periodoAte) && (
+          <button
+            type="button"
+            onClick={() => {
+              setPeriodoDe("");
+              setPeriodoAte("");
+            }}
+            className="text-sm text-neutral-500 underline"
+          >
+            Limpar período
+          </button>
+        )}
+      </div>
+
       <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-800">
         <table className="w-full text-left text-sm">
           <thead className="bg-neutral-100 dark:bg-neutral-900">
@@ -126,15 +213,23 @@ export function RepresentantesTable({ representantes }: { representantes: Repres
             ))}
           </thead>
           <tbody>
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.id} className="border-t border-neutral-100 dark:border-neutral-800">
-                {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-4 py-2 text-neutral-800 dark:text-neutral-200">
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
+            {table.getRowModel().rows.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length} className="px-4 py-8 text-center text-sm text-neutral-500">
+                  Nenhum representante com contrato vigente no período informado.
+                </td>
               </tr>
-            ))}
+            ) : (
+              table.getRowModel().rows.map((row) => (
+                <tr key={row.id} className="border-t border-neutral-100 dark:border-neutral-800">
+                  {row.getVisibleCells().map((cell) => (
+                    <td key={cell.id} className="px-4 py-2 text-neutral-800 dark:text-neutral-200">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

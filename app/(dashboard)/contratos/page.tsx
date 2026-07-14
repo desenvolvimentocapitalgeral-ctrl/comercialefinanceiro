@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth/config";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ContratoInfoTooltip } from "@/components/ui/ContratoInfoTooltip";
 import { parseDataLocal } from "@/lib/utils/data";
+import { tipoContrato } from "@/lib/utils/contrato";
 
 const STATUS_LABEL: Record<string, { label: string; cor: "verde" | "ambar" | "vermelho" | "neutro" }> = {
   ATIVO: { label: "Ativo", cor: "verde" },
@@ -11,14 +12,6 @@ const STATUS_LABEL: Record<string, { label: string; cor: "verde" | "ambar" | "ve
   RESCISAO_PENDENTE_FORMALIZACAO: { label: "Rescisão pendente", cor: "ambar" },
   SEM_TABELA_COMISSAO: { label: "Sem tabela de comissão", cor: "vermelho" },
 };
-
-/** Nomeia o tipo de contrato a partir das regras vigentes — nunca só "motor". */
-function tipoContrato(temComissao: boolean, temBonificacao: boolean): { label: string; cor: "verde" | "ambar" | "vermelho" | "neutro" | "azul" } {
-  if (temComissao && temBonificacao) return { label: "Comissão + Bonificação", cor: "azul" };
-  if (temComissao) return { label: "Só comissão", cor: "neutro" };
-  if (temBonificacao) return { label: "Só bonificação", cor: "neutro" };
-  return { label: "Sem regra vigente", cor: "vermelho" };
-}
 
 export default async function ContratosPage({ searchParams }: { searchParams: Promise<{ de?: string; ate?: string }> }) {
   const sessao = await auth();

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db/client";
 import { auth } from "@/lib/auth/config";
 import { RepresentantesTable, type RepresentanteLinha } from "@/components/tabelas/RepresentantesTable";
+import { formatarDataIso } from "@/lib/utils/data";
 
 export default async function RepresentantesPage() {
   const sessao = await auth();
@@ -12,19 +13,46 @@ export default async function RepresentantesPage() {
     include: {
       contratos: {
         where: { status: "ATIVO" },
+        orderBy: { vigenciaInicio: "desc" },
         take: 1,
+        include: {
+          regrasComissao: { orderBy: { vigenciaCicloInicio: "desc" }, take: 1 },
+          regrasBonificacao: { orderBy: { vigenciaCicloInicio: "desc" }, take: 1 },
+        },
       },
     },
   });
 
-  const linhas: RepresentanteLinha[] = representantes.map((r) => ({
-    id: r.id,
-    nome: r.nome,
-    cpfCnpj: r.cpfCnpj,
-    email: r.email,
-    ativo: r.ativo,
-    contratoAtivo: r.contratos.length > 0,
-  }));
+  const linhas: RepresentanteLinha[] = representantes.map((r) => {
+    const contrato = r.contratos[0];
+    const regraComissao = contrato?.regrasComissao[0];
+    const regraBonificacao = contrato?.regrasBonificacao[0];
+
+    return {
+      id: r.id,
+      nome: r.nome,
+      cpfCnpj: r.cpfCnpj,
+      email: r.email,
+      ativo: r.ativo,
+      contratoAtivo: Boolean(contrato),
+      contratoNumero: contrato?.numero ?? null,
+      contratoVigenciaInicio: contrato ? formatarDataIso(contrato.vigenciaInicio) : null,
+      contratoVigenciaFim: contrato?.vigenciaFim ? formatarDataIso(contrato.vigenciaFim) : null,
+      contratoStatusAssinatura: contrato?.statusAssinatura ?? null,
+      motorComissao: regraComissao?.tipoCalculo ?? null,
+      percentualComissao: regraComissao?.percentual ? `${regraComissao.percentual}%` : null,
+      motorBonificacao: regraBonificacao?.tipoCalculo ?? null,
+      metaBonificacao:
+        regraBonificacao?.metaQuantidadeDoses != null
+          ? `${regraBonificacao.metaQuantidadeDoses} doses`
+          : regraBonificacao?.metaValorFaturamento
+            ? `R$ ${Number(regraBonificacao.metaValorFaturamento).toLocaleString("pt-BR")}`
+            : null,
+      bonusFixoValor: regraBonificacao?.bonusFixoValor ? `R$ ${Number(regraBonificacao.bonusFixoValor).toLocaleString("pt-BR")}` : null,
+      temComissao: Boolean(regraComissao),
+      temBonificacao: Boolean(regraBonificacao),
+    };
+  });
 
   return (
     <div className="flex flex-col gap-4">

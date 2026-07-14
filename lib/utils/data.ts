@@ -9,3 +9,15 @@ export function parseDataLocal(dataStr: string): Date {
   const [ano, mes, dia] = dataStr.split("-").map(Number);
   return new Date(ano, mes - 1, dia);
 }
+
+/**
+ * Inverso de parseDataLocal: formata um Date como "AAAA-MM-DD" usando os
+ * componentes LOCAIS, nunca `.toISOString()` — que converte para UTC e
+ * também sofre do mesmo bug de dia trocado em fusos atrás de UTC.
+ */
+export function formatarDataIso(data: Date): string {
+  const ano = data.getFullYear();
+  const mes = String(data.getMonth() + 1).padStart(2, "0");
+  const dia = String(data.getDate()).padStart(2, "0");
+  return `${ano}-${mes}-${dia}`;
+}
