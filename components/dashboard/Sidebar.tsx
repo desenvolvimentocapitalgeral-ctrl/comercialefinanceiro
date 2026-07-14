@@ -12,6 +12,7 @@ const MODULOS = [
   { href: "/vendas", label: "Vendas" },
   { href: "/contas-a-receber", label: "Contas a Receber" },
   { href: "/comissoes", label: "Comissões" },
+  { href: "/comissoes/adiantamentos", label: "↳ Adiantamentos" },
   { href: "/bonificacoes", label: "Bonificações" },
   { href: "/campanhas", label: "Campanhas" },
   { href: "/relatorios", label: "Relatórios" },
@@ -22,13 +23,19 @@ const MODULOS = [
 export function Sidebar() {
   const pathname = usePathname();
 
+  // Escolhe o href mais específico (mais longo) que bate com a rota atual,
+  // para não acender "Comissões" e "↳ Adiantamentos" ao mesmo tempo.
+  const hrefAtivo = MODULOS.filter((m) => pathname === m.href || pathname.startsWith(m.href + "/")).sort(
+    (a, b) => b.href.length - a.href.length,
+  )[0]?.href;
+
   return (
     <nav className="flex h-full w-60 shrink-0 flex-col gap-1 border-r border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950">
       <div className="mb-4 px-2">
         <p className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">Comercial e Financeiro</p>
       </div>
       {MODULOS.map((modulo) => {
-        const ativo = pathname === modulo.href || pathname.startsWith(modulo.href + "/");
+        const ativo = modulo.href === hrefAtivo;
         return (
           <Link
             key={modulo.href}

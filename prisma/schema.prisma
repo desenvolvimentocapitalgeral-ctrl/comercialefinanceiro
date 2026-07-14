@@ -589,9 +589,30 @@ model Pagamento {
   criadoEm               DateTime      @default(now())
 
   itens PagamentoItem[]
+  compensacoesComoAdiantamento CompensacaoAdiantamento[] @relation("Adiantamento")
+  compensacoesComoRegular      CompensacaoAdiantamento[] @relation("PagamentoRegular")
 
   @@map("pagamentos")
   @@index([representanteId])
+}
+
+// Rastreia quanto de um Pagamento tipo=ADIANTAMENTO já foi aplicado (abatido)
+// em pagamentos regulares futuros — a compensação pode ser parcial e
+// distribuída em mais de um pagamento regular (Prompt 3, §6.3). Nunca
+// automática: cada linha nasce de uma escolha explícita do financeiro.
+model CompensacaoAdiantamento {
+  id                  String    @id @default(cuid())
+  adiantamentoId      String
+  adiantamento        Pagamento @relation("Adiantamento", fields: [adiantamentoId], references: [id])
+  pagamentoRegularId  String
+  pagamentoRegular    Pagamento @relation("PagamentoRegular", fields: [pagamentoRegularId], references: [id])
+  valorCompensado     Decimal   @db.Decimal(14, 2)
+  criadoPorUsuarioId  String
+  criadoEm            DateTime  @default(now())
+
+  @@map("compensacoes_adiantamento")
+  @@index([adiantamentoId])
+  @@index([pagamentoRegularId])
 }
 
 model PagamentoItem {

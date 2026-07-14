@@ -4,7 +4,24 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { aprovarBonificacoes, gerarPagamentoBonificacao, recalcularBonificacaoCicloAtual } from "@/app/(dashboard)/bonificacoes/actions";
+import { buscarSaldosAdiantamento } from "@/app/(dashboard)/comissoes/actions";
 import { AjusteBonificacaoModal } from "@/components/formularios/AjusteBonificacaoModal";
+import type { SaldoAdiantamento, CompensacaoSolicitada } from "@/lib/servicos/adiantamento";
+
+/** Distribui o valor desejado entre os adiantamentos mais antigos primeiro, nunca excedendo o saldo de cada um. */
+function distribuirCompensacao(saldos: SaldoAdiantamento[], valorDesejado: number): CompensacaoSolicitada[] {
+  let restante = valorDesejado;
+  const compensacoes: CompensacaoSolicitada[] = [];
+  for (const saldo of saldos) {
+    if (restante <= 0) break;
+    const valor = Math.min(saldo.saldoEmAberto, restante);
+    if (valor > 0) {
+      compensacoes.push({ adiantamentoId: saldo.id, valor });
+      restante -= valor;
+    }
+  }
+  return compensacoes;
+}
 
 const STATUS_LABEL: Record<string, { label: string; cor: "verde" | "ambar" | "vermelho" | "neutro" | "azul" }> = {
   PENDENTE: { label: "Pendente", cor: "ambar" },
@@ -43,6 +60,8 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
   const [dataPagamento, setDataPagamento] = useState("");
   const [modalAjusteId, setModalAjusteId] = useState<string | null>(null);
   const apuracaoEmAjuste = apuracoes.find((a) => a.id === modalAjusteId);
+  const [saldosAdiantamento, setSaldosAdiantamento] = useState<SaldoAdiantamento[]>([]);
+  const [valorCompensarAdiantamento, setValorCompensarAdiantamento] = useState(0);
 
   function alternarSelecao(id: string) {
     setSelecionadas((atual) => {
@@ -83,6 +102,15 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
     router.refresh();
   }
 
+  async function abrirModalPagamento() {
+    setModalPagamento(true);
+    setValorCompensarAdiantamento(0);
+    if (linhasSelecionadas.length > 0) {
+      const saldos = await buscarSaldosAdiantamento(linhasSelecionadas[0].representanteId);
+      setSaldosAdiantamento(saldos);
+    }
+  }
+
   async function confirmarPagamento() {
     setErro(null);
     if (!dataPagamento) {
@@ -90,7 +118,8 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
       return;
     }
     setProcessando(true);
-    const resultado = await gerarPagamentoBonificacao([...selecionadas], dataPagamento);
+    const compensacoesAdiantamento = distribuirCompensacao(saldosAdiantamento, valorCompensarAdiantamento);
+    const resultado = await gerarPagamentoBonificacao([...selecionadas], dataPagamento, compensacoesAdiantamento);
     setProcessando(false);
     if (!resultado.sucesso) {
       setErro(resultado.erro);
@@ -98,6 +127,7 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
     }
     setModalPagamento(false);
     setDataPagamento("");
+    setValorCompensarAdiantamento(0);
     setSelecionadas(new Set());
     router.refresh();
   }
@@ -135,7 +165,7 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
         <button
           type="button"
           disabled={!todasAprovadas || representantesDistintos > 1 || processando}
-          onClick={() => setModalPagamento(true)}
+          onClick={abrirModalPagamento}
           className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
         >
           Gerar pagamento
@@ -231,6 +261,23 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
               <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">Data do pagamento</label>
               <input type="date" className="input" value={dataPagamento} onChange={(e) => setDataPagamento(e.target.value)} />
             </div>
+            {saldosAdiantamento.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1">
+                <label className="text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                  Compensar adiantamento (saldo disponível:{" "}
+                  {saldosAdiantamento.reduce((acc, s) => acc + s.saldoEmAberto, 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                  )
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input"
+                  value={valorCompensarAdiantamento}
+                  onChange={(e) => setValorCompensarAdiantamento(Number(e.target.value))}
+                />
+                <p className="text-xs text-neutral-500">Ação explícita — nunca compensado automaticamente.</p>
+              </div>
+            )}
             {erro && <p className="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">{erro}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setModalPagamento(false)} className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700">

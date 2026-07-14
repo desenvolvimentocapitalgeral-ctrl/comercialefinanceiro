@@ -6,6 +6,15 @@ import { auth } from "@/lib/auth/config";
 import { parseDataLocal } from "@/lib/utils/data";
 import { criarEstornoComissao, type ResultadoEstorno } from "@/lib/servicos/criarEstornoComissao";
 import { aplicarEstornosComissaoPendentes } from "@/lib/servicos/aplicarCompensacoesPendentes";
+import {
+  criarAdiantamento,
+  listarSaldosAdiantamento,
+  validarCompensacoesAdiantamento,
+  registrarCompensacoesAdiantamento,
+  type ResultadoAdiantamento,
+  type SaldoAdiantamento,
+  type CompensacaoSolicitada,
+} from "@/lib/servicos/adiantamento";
 
 export type ResultadoAcao = { sucesso: true } | { sucesso: false; erro: string; codigo: string };
 
@@ -47,7 +56,11 @@ export async function aprovarApuracoes(apuracaoIds: string[]): Promise<Resultado
  * APROVADA → PAGA (Prompt 1, Parte C §7.2, passo 3). Nunca mistura
  * representantes diferentes no mesmo Pagamento — validação obrigatória.
  */
-export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: string): Promise<ResultadoAcao> {
+export async function gerarPagamento(
+  apuracaoIds: string[],
+  dataPagamentoStr: string,
+  compensacoesAdiantamento: CompensacaoSolicitada[] = [],
+): Promise<ResultadoAcao> {
   const sessao = await exigirSessaoAdminFinanceiro();
   if (!sessao) return { sucesso: false, erro: "Sem permissão.", codigo: "SEM_PERMISSAO" };
 
@@ -74,9 +87,17 @@ export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: st
   const valorBruto = apuracoes.reduce((acc, a) => acc + Number(a.valorComissao), 0);
   const dataPagamento = parseDataLocal(dataPagamentoStr);
 
+  let erroTransacao: ResultadoAcao | null = null;
+
   await prisma.$transaction(async (tx) => {
+    const validacaoAdiantamento = await validarCompensacoesAdiantamento(tx, representanteId, compensacoesAdiantamento);
+    if (!validacaoAdiantamento.valido) {
+      erroTransacao = { sucesso: false, erro: validacaoAdiantamento.erro, codigo: "ADIANTAMENTO_INVALIDO" };
+      return;
+    }
+
     const compensacao = await aplicarEstornosComissaoPendentes(tx, representanteId);
-    const valorTotal = Math.max(0, valorBruto - compensacao.totalDeduzido);
+    const valorTotal = Math.max(0, valorBruto - compensacao.totalDeduzido - validacaoAdiantamento.totalCompensado);
 
     const pagamento = await tx.pagamento.create({
       data: {
@@ -95,6 +116,8 @@ export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: st
       },
     });
 
+    await registrarCompensacoesAdiantamento(tx, pagamento.id, compensacoesAdiantamento, sessao.user.id);
+
     await tx.apuracaoComissao.updateMany({ where: { id: { in: apuracaoIds } }, data: { status: "PAGA" } });
 
     await tx.logAuditoria.create({
@@ -107,6 +130,7 @@ export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: st
           valorBruto,
           estornosCompensados: compensacao.quantidade,
           valorDeduzidoPorEstornos: compensacao.totalDeduzido,
+          valorCompensadoPorAdiantamento: validacaoAdiantamento.totalCompensado,
           valorTotal,
           quantidadeApuracoes: apuracaoIds.length,
         },
@@ -115,8 +139,34 @@ export async function gerarPagamento(apuracaoIds: string[], dataPagamentoStr: st
     });
   });
 
+  if (erroTransacao) return erroTransacao;
+
   revalidatePath("/comissoes");
   return { sucesso: true };
+}
+
+/** Novo adiantamento (Prompt 3, §6.3) — nasce sem apurações vinculadas. */
+export async function novoAdiantamento(representanteId: string, valor: number, dataPagamentoStr: string, motivo: string): Promise<ResultadoAdiantamento> {
+  const sessao = await exigirSessaoAdminFinanceiro();
+  if (!sessao) return { sucesso: false, erro: "Sem permissão.", codigo: "SEM_PERMISSAO" };
+
+  if (!motivo || motivo.trim().length === 0) {
+    return { sucesso: false, erro: "Informe o motivo do adiantamento.", codigo: "MOTIVO_OBRIGATORIO" };
+  }
+  if (!dataPagamentoStr) {
+    return { sucesso: false, erro: "Informe a data do adiantamento.", codigo: "DATA_OBRIGATORIA" };
+  }
+
+  const resultado = await criarAdiantamento(representanteId, valor, parseDataLocal(dataPagamentoStr), sessao.user.id, motivo);
+
+  if (resultado.sucesso) revalidatePath("/comissoes/adiantamentos");
+  return resultado;
+}
+
+export async function buscarSaldosAdiantamento(representanteId: string): Promise<SaldoAdiantamento[]> {
+  const sessao = await exigirSessaoAdminFinanceiro();
+  if (!sessao) return [];
+  return listarSaldosAdiantamento(representanteId);
 }
 
 /** Estorno de comissão já paga (Prompt 3, §6.4) — deduzido do próximo pagamento regular. */

@@ -7,6 +7,11 @@ import { calcularCiclo } from "@/lib/calculos/ciclo";
 import { calcularApuracaoBonificacao, type ResultadoApuracaoBonificacao } from "@/lib/servicos/gerarApuracaoBonificacao";
 import { criarAjusteBonificacao, type ResultadoAjuste } from "@/lib/servicos/criarAjusteBonificacao";
 import { aplicarAjustesBonificacaoPendentes } from "@/lib/servicos/aplicarCompensacoesPendentes";
+import {
+  validarCompensacoesAdiantamento,
+  registrarCompensacoesAdiantamento,
+  type CompensacaoSolicitada,
+} from "@/lib/servicos/adiantamento";
 
 export type ResultadoAcao = { sucesso: true } | { sucesso: false; erro: string; codigo: string };
 
@@ -49,7 +54,11 @@ export async function aprovarBonificacoes(apuracaoIds: string[]): Promise<Result
   return { sucesso: true };
 }
 
-export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagamentoStr: string): Promise<ResultadoAcao> {
+export async function gerarPagamentoBonificacao(
+  apuracaoIds: string[],
+  dataPagamentoStr: string,
+  compensacoesAdiantamento: CompensacaoSolicitada[] = [],
+): Promise<ResultadoAcao> {
   const sessao = await exigirSessaoAdminFinanceiro();
   if (!sessao) return { sucesso: false, erro: "Sem permissão.", codigo: "SEM_PERMISSAO" };
 
@@ -70,9 +79,17 @@ export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagam
   const valorBruto = apuracoes.reduce((acc, a) => acc + Number(a.valorBonificacao), 0);
   const dataPagamento = parseDataLocal(dataPagamentoStr);
 
+  let erroTransacao: ResultadoAcao | null = null;
+
   await prisma.$transaction(async (tx) => {
+    const validacaoAdiantamento = await validarCompensacoesAdiantamento(tx, representanteId, compensacoesAdiantamento);
+    if (!validacaoAdiantamento.valido) {
+      erroTransacao = { sucesso: false, erro: validacaoAdiantamento.erro, codigo: "ADIANTAMENTO_INVALIDO" };
+      return;
+    }
+
     const compensacao = await aplicarAjustesBonificacaoPendentes(tx, representanteId);
-    const valorTotal = Math.max(0, valorBruto - compensacao.totalDeduzido);
+    const valorTotal = Math.max(0, valorBruto - compensacao.totalDeduzido - validacaoAdiantamento.totalCompensado);
 
     const pagamento = await tx.pagamento.create({
       data: {
@@ -84,6 +101,8 @@ export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagam
         itens: { create: apuracoes.map((a) => ({ apuracaoBonificacaoId: a.id, valor: a.valorBonificacao, valorPago: a.valorBonificacao })) },
       },
     });
+
+    await registrarCompensacoesAdiantamento(tx, pagamento.id, compensacoesAdiantamento, sessao.user.id);
 
     await tx.apuracaoBonificacao.updateMany({ where: { id: { in: apuracaoIds } }, data: { status: "PAGA" } });
 
@@ -97,6 +116,7 @@ export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagam
           valorBruto,
           ajustesCompensados: compensacao.quantidade,
           valorLiquidoDeAjustes: -compensacao.totalDeduzido,
+          valorCompensadoPorAdiantamento: validacaoAdiantamento.totalCompensado,
           valorTotal,
           quantidadeApuracoes: apuracaoIds.length,
           tipo: "bonificacao",
@@ -105,6 +125,8 @@ export async function gerarPagamentoBonificacao(apuracaoIds: string[], dataPagam
       },
     });
   });
+
+  if (erroTransacao) return erroTransacao;
 
   revalidatePath("/bonificacoes");
   return { sucesso: true };
