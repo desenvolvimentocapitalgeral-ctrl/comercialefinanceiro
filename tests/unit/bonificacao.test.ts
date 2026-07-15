@@ -65,6 +65,30 @@ describe("calcularBonificacaoMetaDoses", () => {
     expect(resultado.dosesApuradas).toBe(499);
     expect(resultado.bateuMeta).toBe(false); // 499 < 500, faltou por 1 dose
   });
+
+  it("usa limiarExcedenteDoses (quando maior que a meta) em vez da meta para separar o excedente", () => {
+    // Contrato tipo Lucas Sales: meta de 300 doses paga o bônus fixo, mas a
+    // comissão de 20% só incide acima de 1.000 doses/mês.
+    const vendas: VendaParaMetaDoses[] = [
+      { vendaId: "v1", dataValidacao: new Date(2026, 5, 1), doses: 1000, valorRecebido: 17000 },
+      { vendaId: "v2", dataValidacao: new Date(2026, 5, 20), doses: 200, valorRecebido: 3400 },
+    ];
+    const resultado = calcularBonificacaoMetaDoses({
+      vendas,
+      metaDoses: 300,
+      percentualSemMeta: 0,
+      percentualExcedente: 20,
+      bonusFixoValor: 20000,
+      limiarExcedenteDoses: 1000,
+    });
+
+    expect(resultado.bateuMeta).toBe(true);
+    expect(resultado.dosesApuradas).toBe(1200);
+    expect(resultado.bonusFixo).toBe(20000);
+    // as primeiras 1000 doses (v1 inteira) não geram comissão; as 200 doses de v2 são 100% excedente
+    expect(resultado.comissaoSobreExcedente).toBe(680); // 3400 * 20%
+    expect(resultado.valorTotal).toBe(20680);
+  });
 });
 
 describe("calcularBonificacaoValorFixoPorFaturamento", () => {

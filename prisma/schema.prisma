@@ -281,7 +281,12 @@ model RegraBonificacao {
   baseCiclo            BaseCicloBonificacao @default(FATURAMENTO)
   bonusFixoValor       Decimal              @db.Decimal(14, 2) // valor pago em R$ — sempre fixo
   percentualSemMeta    Decimal              @db.Decimal(6, 3)  // % flat se a meta NÃO for batida
-  percentualExcedente  Decimal?             @db.Decimal(6, 3)  // % só sobre o volume acima da meta
+  percentualExcedente  Decimal?             @db.Decimal(6, 3)  // % só sobre o volume acima do limiar de excedente
+  limiarExcedenteDoses Int?                 // a partir de qual quantidade de doses o percentualExcedente passa a
+                                             // incidir; null = usa metaQuantidadeDoses (padrão). Alguns contratos têm
+                                             // um limiar de excedente MAIOR que a meta do bônus fixo (ex: Lucas Sales —
+                                             // meta de 300 doses/mês para os R$20.000 fixos, mas comissão de 20% só
+                                             // acima de 1.000 doses/mês).
   faixasEscalonadas    Json?                // usado por variantes escalonadas: [{atingimentoMinimo, percentual}]
   condicoesPerda       String?
   prorateaPrimeiroCiclo Boolean             @default(false)
@@ -543,7 +548,9 @@ model ApuracaoBonificacao {
   percentualAtingimento Decimal           @db.Decimal(6, 2)
   bateuMeta             Boolean
   motivoPerda           String?           // preenchido quando condicoesPerda zera o bônus mesmo com meta numérica batida
-  valorBonificacao      Decimal           @db.Decimal(14, 2)
+  valorBonificacao      Decimal           @db.Decimal(14, 2) // total pago = valorBonusFixo + valorComissaoVariavel (mantido para não quebrar Pagamento/PagamentoItem existentes)
+  valorBonusFixo        Decimal           @default(0) @db.Decimal(14, 2) // parte fixa (só quando bateuMeta) — "Bonificação" de fato
+  valorComissaoVariavel Decimal           @default(0) @db.Decimal(14, 2) // parte percentual (sem-meta flat OU excedente) — "Comissão"
   status                StatusApuracao    @default(PENDENTE)
   calculadoEm           DateTime          @default(now())
 

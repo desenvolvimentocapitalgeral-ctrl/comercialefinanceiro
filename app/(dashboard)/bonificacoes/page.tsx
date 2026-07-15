@@ -32,6 +32,8 @@ export default async function BonificacoesPage() {
     percentualAtingimento: Number(a.percentualAtingimento),
     bateuMeta: a.bateuMeta,
     valorBonificacao: Number(a.valorBonificacao),
+    valorBonusFixo: Number(a.valorBonusFixo),
+    valorComissaoVariavel: Number(a.valorComissaoVariavel),
     status: a.status,
   }));
 

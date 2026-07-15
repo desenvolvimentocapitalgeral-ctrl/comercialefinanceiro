@@ -36,6 +36,8 @@ export async function calcularApuracaoBonificacao(
   let metaValor = 0;
   let bateuMeta = false;
   let valorBonificacao = 0;
+  let valorBonusFixo = 0;
+  let valorComissaoVariavel = 0;
 
   if (regra.tipoMeta === "QUANTIDADE_DOSES") {
     // Meta em doses conta por VENDA/FATURAMENTO — nunca por recebimento
@@ -55,11 +57,17 @@ export async function calcularApuracaoBonificacao(
       percentualSemMeta: Number(regra.percentualSemMeta),
       percentualExcedente: Number(regra.percentualExcedente ?? 0),
       bonusFixoValor: Number(regra.bonusFixoValor),
+      limiarExcedenteDoses: regra.limiarExcedenteDoses ?? undefined,
     });
 
     dosesApuradas = resultado.dosesApuradas;
     bateuMeta = resultado.bateuMeta;
     valorBonificacao = resultado.valorTotal;
+    // "Bonificação" = parte fixa (só quando bate a meta); "Comissão" = parte
+    // percentual (flat sem-meta OU sobre o excedente) — nunca a mesma coisa,
+    // mesmo que hoje sejam pagas juntas no mesmo valorBonificacao total.
+    valorBonusFixo = resultado.bonusFixo ?? 0;
+    valorComissaoVariavel = resultado.comissaoSobreExcedente ?? resultado.valorComissaoSemMeta ?? 0;
     valorApurado = vendasNoCiclo.reduce((acc, v) => acc + v.valorRecebido, 0);
   } else {
     valorApurado = vendas
@@ -79,6 +87,9 @@ export async function calcularApuracaoBonificacao(
     });
     bateuMeta = resultado.bateuMeta;
     valorBonificacao = resultado.valorBonificacao;
+    // motor VALOR_FATURAMENTO é tudo-ou-nada: o único componente é o bônus fixo, sem parte variável de comissão
+    valorBonusFixo = valorBonificacao;
+    valorComissaoVariavel = 0;
   }
 
   // Atingimento sempre compara a meta contra a mesma unidade em que ela foi definida:
@@ -89,7 +100,17 @@ export async function calcularApuracaoBonificacao(
   await prisma.$transaction(async (tx) => {
     await tx.apuracaoBonificacao.upsert({
       where: { representanteId_regraBonificacaoId_cicloId: { representanteId, regraBonificacaoId, cicloId } },
-      update: { valorApurado, dosesApuradas, metaValor, percentualAtingimento, bateuMeta, valorBonificacao, status: "PENDENTE" },
+      update: {
+        valorApurado,
+        dosesApuradas,
+        metaValor,
+        percentualAtingimento,
+        bateuMeta,
+        valorBonificacao,
+        valorBonusFixo,
+        valorComissaoVariavel,
+        status: "PENDENTE",
+      },
       create: {
         representanteId,
         contratoId: regra.contratoId,
@@ -101,6 +122,8 @@ export async function calcularApuracaoBonificacao(
         percentualAtingimento,
         bateuMeta,
         valorBonificacao,
+        valorBonusFixo,
+        valorComissaoVariavel,
         status: "PENDENTE",
       },
     });

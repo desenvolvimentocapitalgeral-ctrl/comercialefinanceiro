@@ -39,8 +39,10 @@ export function calcularBonificacaoMetaDoses(params: {
   percentualSemMeta: number;
   percentualExcedente: number;
   bonusFixoValor: number;
+  limiarExcedenteDoses?: number; // a partir de qual dose o percentualExcedente passa a incidir; default = metaDoses
 }): ResultadoBonificacaoMetaDoses {
   const { vendas, metaDoses, percentualSemMeta, percentualExcedente, bonusFixoValor } = params;
+  const limiarExcedente = params.limiarExcedenteDoses ?? metaDoses;
 
   const ordenadas = [...vendas].sort((a, b) => a.dataValidacao.getTime() - b.dataValidacao.getTime());
   const totalDoses = ordenadas.reduce((acc, v) => acc + v.doses, 0);
@@ -56,28 +58,28 @@ export function calcularBonificacaoMetaDoses(params: {
     };
   }
 
-  // aloca doses/valor cronologicamente até completar a meta; o restante é excedente
-  let dosesAlocadasNaMeta = 0;
+  // aloca doses/valor cronologicamente até completar o limiar de excedente (>= metaDoses); o restante é excedente
+  let dosesAlocadas = 0;
   let valorExcedente = 0;
 
   for (const venda of ordenadas) {
-    if (dosesAlocadasNaMeta >= metaDoses) {
+    if (dosesAlocadas >= limiarExcedente) {
       // venda inteira é excedente
       valorExcedente += venda.valorRecebido;
       continue;
     }
 
-    const dosesRestantesParaMeta = metaDoses - dosesAlocadasNaMeta;
+    const dosesRestantesParaLimiar = limiarExcedente - dosesAlocadas;
 
-    if (venda.doses <= dosesRestantesParaMeta) {
-      // venda inteira ainda cabe dentro da meta
-      dosesAlocadasNaMeta += venda.doses;
+    if (venda.doses <= dosesRestantesParaLimiar) {
+      // venda inteira ainda cabe dentro do limiar
+      dosesAlocadas += venda.doses;
     } else {
-      // venda cruza a fronteira da meta: parte dentro, parte excedente (proporcional ao valor por dose)
-      const dosesExcedentesDestaVenda = venda.doses - dosesRestantesParaMeta;
+      // venda cruza a fronteira do limiar: parte dentro, parte excedente (proporcional ao valor por dose)
+      const dosesExcedentesDestaVenda = venda.doses - dosesRestantesParaLimiar;
       const valorPorDose = venda.valorRecebido / venda.doses;
       valorExcedente += dosesExcedentesDestaVenda * valorPorDose;
-      dosesAlocadasNaMeta = metaDoses;
+      dosesAlocadas = limiarExcedente;
     }
   }
 

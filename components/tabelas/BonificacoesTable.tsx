@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { aprovarBonificacoes, gerarPagamentoBonificacao, recalcularBonificacaoCicloAtual } from "@/app/(dashboard)/bonificacoes/actions";
@@ -42,6 +43,8 @@ export interface ApuracaoBonificacaoLinha {
   percentualAtingimento: number;
   bateuMeta: boolean;
   valorBonificacao: number;
+  valorBonusFixo: number;
+  valorComissaoVariavel: number;
   status: string;
 }
 
@@ -190,7 +193,9 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Apurado</th>
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Atingimento</th>
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Bateu meta?</th>
-                <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Bonificação</th>
+                <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Bonificação (fixa)</th>
+                <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Comissão (variável)</th>
+                <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Total</th>
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Status</th>
                 <th className="px-4 py-2 font-medium text-neutral-600 dark:text-neutral-300">Ações</th>
               </tr>
@@ -222,23 +227,33 @@ export function BonificacoesTable({ apuracoes, regras }: { apuracoes: ApuracaoBo
                     <td className="px-4 py-2">
                       <StatusBadge label={a.bateuMeta ? "Sim" : "Não"} cor={a.bateuMeta ? "verde" : "ambar"} />
                     </td>
+                    <td className="px-4 py-2 numerico text-neutral-800 dark:text-neutral-200">
+                      {a.valorBonusFixo.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </td>
+                    <td className="px-4 py-2 numerico text-neutral-800 dark:text-neutral-200">
+                      {a.valorComissaoVariavel.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </td>
                     <td className="px-4 py-2 numerico font-medium text-neutral-900 dark:text-neutral-100">
                       {a.valorBonificacao.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                     </td>
                     <td className="px-4 py-2">
                       <StatusBadge label={STATUS_LABEL[a.status].label} cor={STATUS_LABEL[a.status].cor} />
                     </td>
-                    <td className="px-4 py-2 text-sm">
-                      {a.status === "PAGA" ? (
+                    <td className="px-4 py-2 text-sm whitespace-nowrap">
+                      <Link
+                        href={`/bonificacoes/${a.id}/recibo`}
+                        className="text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                      >
+                        Recibo
+                      </Link>
+                      {a.status === "PAGA" && (
                         <button
                           type="button"
                           onClick={() => setModalAjusteId(a.id)}
-                          className="text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+                          className="ml-3 text-neutral-600 underline hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
                         >
                           Ajustar
                         </button>
-                      ) : (
-                        "—"
                       )}
                     </td>
                   </tr>
