@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db/client";
 import { auth } from "@/lib/auth/config";
-import { resolverVigenciaPorCiclo, compararCicloId } from "@/lib/calculos/ciclo";
-import { calcularComissaoPercentualFixo } from "@/lib/calculos/comissao";
+import { compararCicloId } from "@/lib/calculos/ciclo";
+import { calcularPrevisaoRecebimentos } from "@/lib/servicos/previsaoRecebimentos";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 
 const FORMATO_MOEDA = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -38,18 +38,7 @@ export default async function RelatorioPrevisaoComissaoPage() {
       })
     : [];
 
-  const parcelasPendentes = await prisma.parcela.findMany({
-    where: { status: "PENDENTE", venda: { representante: { empresaId } } },
-    include: {
-      venda: {
-        include: {
-          representante: { select: { id: true, nome: true } },
-          contrato: { include: { regrasComissao: true } },
-        },
-      },
-    },
-    orderBy: { dataVencimento: "asc" },
-  });
+  const previsaoPorRepresentante = await calcularPrevisaoRecebimentos(empresaId);
 
   interface LinhaTimeline {
     representanteId: string;
@@ -60,47 +49,21 @@ export default async function RelatorioPrevisaoComissaoPage() {
     qtdParcelas: number;
   }
 
+  // a página exibe agrupado por mês (cada mês lista os representantes); o
+  // serviço devolve agrupado por representante — inverte aqui.
   const mesesMap = new Map<string, Map<string, LinhaTimeline>>();
-
-  for (const parcela of parcelasPendentes) {
-    const mesChave = `${parcela.dataVencimento.getFullYear()}-${String(parcela.dataVencimento.getMonth() + 1).padStart(2, "0")}`;
-    const venda = parcela.venda;
-    const regra = resolverVigenciaPorCiclo(venda.contrato.regrasComissao, venda.cicloId);
-
-    const valorParcela = Number(parcela.valorParcela);
-    let calculavel = 0;
-    let aApurar = 0;
-
-    if (regra?.tipoCalculo === "FIXO" && regra.percentual !== null) {
-      const resultado = calcularComissaoPercentualFixo({ valorRecebido: valorParcela, percentual: Number(regra.percentual) });
-      if (!resultado.bloqueado) calculavel = resultado.valorComissao;
-      else aApurar = valorParcela;
-    } else if (regra?.tipoCalculo === "META") {
-      // Motor META não gera comissão por parcela — o retorno do representante vem
-      // inteiramente da bonificação de ciclo (ver seção acima), não aqui.
-      aApurar = 0;
-    } else {
-      // DESC_POL1 / DESC_POL2 / POLV3_LEGACY / SEMTAB dependem do desconto concedido
-      // por dose (dado manual do ERP) — não dá para prever sem essa informação.
-      aApurar = valorParcela;
+  for (const rep of previsaoPorRepresentante) {
+    for (const item of rep.porMes) {
+      if (!mesesMap.has(item.mesChave)) mesesMap.set(item.mesChave, new Map());
+      mesesMap.get(item.mesChave)!.set(rep.representanteId, {
+        representanteId: rep.representanteId,
+        representante: nomeRepresentante.get(rep.representanteId) ?? rep.representanteNome,
+        valorPendente: item.valorPendente,
+        valorCalculavel: item.valorCalculavel,
+        valorAApurar: item.valorAApurar,
+        qtdParcelas: item.qtdParcelas,
+      });
     }
-
-    if (!mesesMap.has(mesChave)) mesesMap.set(mesChave, new Map());
-    const porRepresentante = mesesMap.get(mesChave)!;
-
-    const linha = porRepresentante.get(venda.representanteId) ?? {
-      representanteId: venda.representanteId,
-      representante: nomeRepresentante.get(venda.representanteId) ?? venda.representante.nome,
-      valorPendente: 0,
-      valorCalculavel: 0,
-      valorAApurar: 0,
-      qtdParcelas: 0,
-    };
-    linha.valorPendente += valorParcela;
-    linha.valorCalculavel += calculavel;
-    linha.valorAApurar += aApurar;
-    linha.qtdParcelas += 1;
-    porRepresentante.set(venda.representanteId, linha);
   }
 
   const meses = [...mesesMap.keys()].sort(compararCicloId);
@@ -192,8 +155,9 @@ export default async function RelatorioPrevisaoComissaoPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Linha do tempo — parcelas pendentes</h2>
         <p className="text-sm text-neutral-500">
-          Agrupado por mês de vencimento. &quot;Calculável&quot; é comissão de percentual fixo, exata. &quot;A apurar&quot; depende de
-          tabela de desconto por dose ou de meta de ciclo (motor META), que só se resolve quando o ciclo fecha.
+          Agrupado por mês de vencimento. &quot;Calculável&quot; é comissão de percentual fixo, ou a parte do motor de meta em
+          doses cuja fração de excedente já é conhecida hoje (depende das doses vendidas, não do dinheiro ter entrado) — exata em
+          ambos os casos. &quot;A apurar&quot; depende de tabela de desconto por dose (dado manual do ERP), que só chega depois.
         </p>
 
         {meses.length === 0 ? (

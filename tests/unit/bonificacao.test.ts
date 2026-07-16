@@ -24,6 +24,8 @@ describe("calcularBonificacaoMetaDoses", () => {
     expect(resultado.bateuMeta).toBe(false);
     expect(resultado.dosesApuradas).toBe(180);
     expect(resultado.valorTotal).toBeCloseTo(750, 2);
+    // sem meta batida, o percentual flat incide sobre 100% de qualquer venda
+    expect(resultado.fracaoExcedentePorVenda).toEqual({ v1: 1 });
   });
 
   it("paga bônus fixo + comissão só sobre o excedente quando a meta é batida exatamente", () => {
@@ -53,6 +55,9 @@ describe("calcularBonificacaoMetaDoses", () => {
     // comissão sobre excedente = 3000 * 10% = 300
     expect(resultado.comissaoSobreExcedente).toBe(300);
     expect(resultado.valorTotal).toBe(4300);
+    // v1 (mais antiga) cabe inteira dentro da meta -> 0% excedente; v2 tem 100 de 250 doses excedentes -> 40%
+    expect(resultado.fracaoExcedentePorVenda["v1-antes"]).toBe(0);
+    expect(resultado.fracaoExcedentePorVenda["v2-depois"]).toBeCloseTo(0.4, 5);
   });
 
   it("soma múltiplas vendas para determinar se bate a meta", () => {
@@ -88,6 +93,8 @@ describe("calcularBonificacaoMetaDoses", () => {
     // as primeiras 1000 doses (v1 inteira) não geram comissão; as 200 doses de v2 são 100% excedente
     expect(resultado.comissaoSobreExcedente).toBe(680); // 3400 * 20%
     expect(resultado.valorTotal).toBe(20680);
+    expect(resultado.fracaoExcedentePorVenda.v1).toBe(0);
+    expect(resultado.fracaoExcedentePorVenda.v2).toBe(1);
   });
 });
 

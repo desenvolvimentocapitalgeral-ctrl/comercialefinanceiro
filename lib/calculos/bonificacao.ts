@@ -25,6 +25,12 @@ export interface ResultadoBonificacaoMetaDoses {
   bonusFixo?: number; // presente quando bateuMeta
   comissaoSobreExcedente?: number; // presente quando bateuMeta
   valorTotal: number;
+  // Fração (0 a 1) de cada venda que corresponde a excedente da meta — usada para
+  // projetar, por parcela ainda não recebida, quanto dela vai virar comissão
+  // quando o cliente pagar (linha do tempo de comissão futura). !bateuMeta = 1
+  // para todas (percentualSemMeta incide sobre tudo); bateuMeta = proporção de
+  // doses desta venda que ficou acima do limiar de excedente.
+  fracaoExcedentePorVenda: Record<string, number>;
 }
 
 /**
@@ -55,17 +61,20 @@ export function calcularBonificacaoMetaDoses(params: {
       dosesApuradas: totalDoses,
       valorComissaoSemMeta,
       valorTotal: valorComissaoSemMeta,
+      fracaoExcedentePorVenda: Object.fromEntries(ordenadas.map((v) => [v.vendaId, 1])),
     };
   }
 
   // aloca doses/valor cronologicamente até completar o limiar de excedente (>= metaDoses); o restante é excedente
   let dosesAlocadas = 0;
   let valorExcedente = 0;
+  const fracaoExcedentePorVenda: Record<string, number> = {};
 
   for (const venda of ordenadas) {
     if (dosesAlocadas >= limiarExcedente) {
       // venda inteira é excedente
       valorExcedente += venda.valorRecebido;
+      fracaoExcedentePorVenda[venda.vendaId] = 1;
       continue;
     }
 
@@ -74,12 +83,14 @@ export function calcularBonificacaoMetaDoses(params: {
     if (venda.doses <= dosesRestantesParaLimiar) {
       // venda inteira ainda cabe dentro do limiar
       dosesAlocadas += venda.doses;
+      fracaoExcedentePorVenda[venda.vendaId] = 0;
     } else {
       // venda cruza a fronteira do limiar: parte dentro, parte excedente (proporcional ao valor por dose)
       const dosesExcedentesDestaVenda = venda.doses - dosesRestantesParaLimiar;
       const valorPorDose = venda.valorRecebido / venda.doses;
       valorExcedente += dosesExcedentesDestaVenda * valorPorDose;
       dosesAlocadas = limiarExcedente;
+      fracaoExcedentePorVenda[venda.vendaId] = venda.doses > 0 ? dosesExcedentesDestaVenda / venda.doses : 0;
     }
   }
 
@@ -91,6 +102,7 @@ export function calcularBonificacaoMetaDoses(params: {
     bonusFixo: bonusFixoValor,
     comissaoSobreExcedente,
     valorTotal: arredondar(bonusFixoValor + comissaoSobreExcedente),
+    fracaoExcedentePorVenda,
   };
 }
 

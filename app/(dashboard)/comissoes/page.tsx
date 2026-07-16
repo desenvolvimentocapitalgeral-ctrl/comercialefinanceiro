@@ -1,9 +1,14 @@
 import { prisma } from "@/lib/db/client";
 import { auth } from "@/lib/auth/config";
 import { ComissoesTable, type ApuracaoLinha } from "@/components/tabelas/ComissoesTable";
+import { RepresentanteTimelineCard } from "@/components/comissoes/RepresentanteTimelineCard";
+import { calcularPrevisaoRecebimentos } from "@/lib/servicos/previsaoRecebimentos";
 
 export default async function ComissoesPage() {
   const sessao = await auth();
+  const empresaId = sessao!.user.empresaId;
+
+  const previsaoPorRepresentante = await calcularPrevisaoRecebimentos(empresaId);
 
   const apuracoes = await prisma.apuracaoComissao.findMany({
     where: { parcela: { venda: { empresaId: sessao!.user.empresaId } } },
@@ -51,6 +56,26 @@ export default async function ComissoesPage() {
           <p className="text-xs text-neutral-500">Bloqueadas (dado manual faltante)</p>
           <p className="numerico text-lg font-semibold text-red-600">{totalBloqueadas}</p>
         </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Linha do tempo por representante — a receber</h2>
+          <p className="text-sm text-neutral-500">
+            Quanto cada representante tem pendente de recebimento, mês a mês, somando o motor de percentual fixo e a
+            parte já determinável do motor de meta em doses. Comissão só é paga depois que o cliente efetivamente paga.
+          </p>
+        </div>
+
+        {previsaoPorRepresentante.length === 0 ? (
+          <p className="text-sm text-neutral-500">Nenhuma parcela pendente de recebimento.</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {previsaoPorRepresentante.map((p) => (
+              <RepresentanteTimelineCard key={p.representanteId} previsao={p} />
+            ))}
+          </div>
+        )}
       </div>
 
       {linhas.length === 0 ? (
