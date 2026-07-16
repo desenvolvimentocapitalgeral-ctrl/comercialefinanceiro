@@ -13,7 +13,7 @@ export interface FaixaEscalonada {
 
 export interface VendaParaMetaDoses {
   vendaId: string;
-  dataValidacao: Date; // data de entrega/venda usada para ordenação cronológica (FIFO)
+  dataValidacao: Date; // mantido para o motor de faturamento/relatórios — não usado no rateio (que é por receita, não por ordem cronológica)
   doses: number;
   valorRecebido: number;
 }
@@ -36,8 +36,14 @@ export interface ResultadoBonificacaoMetaDoses {
 /**
  * Motor META: se a meta de doses do ciclo não é batida, aplica percentual flat
  * sobre TODO o valor recebido. Se é batida, paga bônus fixo + percentual só
- * sobre o valor das doses que EXCEDEM a meta — alocadas em ordem cronológica
- * (as primeiras N doses "completam" a meta e não geram comissão percentual).
+ * sobre o valor das doses que EXCEDEM o limiar de excedente — rateado
+ * PROPORCIONALMENTE À RECEITA de cada venda (não por ordem cronológica):
+ * cada venda "empresta" uma fatia do limiar proporcional à sua participação
+ * na receita total do ciclo; o que sobra de doses acima dessa fatia é
+ * excedente, valorizado ao preço por dose da própria venda. Mesmo método da
+ * planilha de referência (memória de cálculo) usada pela empresa — decisão
+ * confirmada com o usuário em 2026-07-16, depois de uma inconsistência entre
+ * este motor (que antes usava FIFO cronológico) e a planilha.
  */
 export function calcularBonificacaoMetaDoses(params: {
   vendas: VendaParaMetaDoses[];
@@ -50,9 +56,8 @@ export function calcularBonificacaoMetaDoses(params: {
   const { vendas, metaDoses, percentualSemMeta, percentualExcedente, bonusFixoValor } = params;
   const limiarExcedente = params.limiarExcedenteDoses ?? metaDoses;
 
-  const ordenadas = [...vendas].sort((a, b) => a.dataValidacao.getTime() - b.dataValidacao.getTime());
-  const totalDoses = ordenadas.reduce((acc, v) => acc + v.doses, 0);
-  const totalRecebido = ordenadas.reduce((acc, v) => acc + v.valorRecebido, 0);
+  const totalDoses = vendas.reduce((acc, v) => acc + v.doses, 0);
+  const totalRecebido = vendas.reduce((acc, v) => acc + v.valorRecebido, 0);
 
   if (totalDoses < metaDoses) {
     const valorComissaoSemMeta = arredondar(totalRecebido * (percentualSemMeta / 100));
@@ -61,37 +66,21 @@ export function calcularBonificacaoMetaDoses(params: {
       dosesApuradas: totalDoses,
       valorComissaoSemMeta,
       valorTotal: valorComissaoSemMeta,
-      fracaoExcedentePorVenda: Object.fromEntries(ordenadas.map((v) => [v.vendaId, 1])),
+      fracaoExcedentePorVenda: Object.fromEntries(vendas.map((v) => [v.vendaId, 1])),
     };
   }
 
-  // aloca doses/valor cronologicamente até completar o limiar de excedente (>= metaDoses); o restante é excedente
-  let dosesAlocadas = 0;
   let valorExcedente = 0;
   const fracaoExcedentePorVenda: Record<string, number> = {};
 
-  for (const venda of ordenadas) {
-    if (dosesAlocadas >= limiarExcedente) {
-      // venda inteira é excedente
-      valorExcedente += venda.valorRecebido;
-      fracaoExcedentePorVenda[venda.vendaId] = 1;
-      continue;
-    }
+  for (const venda of vendas) {
+    const participacaoReceita = totalRecebido > 0 ? venda.valorRecebido / totalRecebido : 0;
+    const dosesEmprestadasAoLimiar = limiarExcedente * participacaoReceita;
+    const dosesExcedentesDestaVenda = Math.max(0, venda.doses - dosesEmprestadasAoLimiar);
+    const valorPorDose = venda.doses > 0 ? venda.valorRecebido / venda.doses : 0;
 
-    const dosesRestantesParaLimiar = limiarExcedente - dosesAlocadas;
-
-    if (venda.doses <= dosesRestantesParaLimiar) {
-      // venda inteira ainda cabe dentro do limiar
-      dosesAlocadas += venda.doses;
-      fracaoExcedentePorVenda[venda.vendaId] = 0;
-    } else {
-      // venda cruza a fronteira do limiar: parte dentro, parte excedente (proporcional ao valor por dose)
-      const dosesExcedentesDestaVenda = venda.doses - dosesRestantesParaLimiar;
-      const valorPorDose = venda.valorRecebido / venda.doses;
-      valorExcedente += dosesExcedentesDestaVenda * valorPorDose;
-      dosesAlocadas = limiarExcedente;
-      fracaoExcedentePorVenda[venda.vendaId] = venda.doses > 0 ? dosesExcedentesDestaVenda / venda.doses : 0;
-    }
+    valorExcedente += dosesExcedentesDestaVenda * valorPorDose;
+    fracaoExcedentePorVenda[venda.vendaId] = venda.doses > 0 ? dosesExcedentesDestaVenda / venda.doses : 0;
   }
 
   const comissaoSobreExcedente = arredondar(valorExcedente * (percentualExcedente / 100));

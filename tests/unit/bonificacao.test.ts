@@ -40,24 +40,44 @@ describe("calcularBonificacaoMetaDoses", () => {
     expect(resultado.valorTotal).toBe(4000);
   });
 
-  it("aloca doses em ordem cronológica (FIFO) e separa corretamente uma venda que cruza a fronteira da meta", () => {
-    // venda mais antiga: 350 doses -> cabe inteira dentro da meta (faltam 150 para completar)
-    // venda seguinte: 250 doses, R$7.500 -> 150 completam a meta, 100 doses são excedente
+  it("rateia o limiar proporcionalmente à receita de cada venda quando o preço por dose é uniforme", () => {
+    // mesmo preço por dose (R$30) nas duas vendas -> participação na receita =
+    // participação em doses, então cada venda empresta a mesma fração (250/600
+    // e 350/600) do limiar e sobra a mesma fração de excedente para as duas.
     const vendas: VendaParaMetaDoses[] = [
-      { vendaId: "v2-depois", dataValidacao: new Date(2026, 5, 20), doses: 250, valorRecebido: 7500 },
-      { vendaId: "v1-antes", dataValidacao: new Date(2026, 5, 1), doses: 350, valorRecebido: 10500 },
+      { vendaId: "v2", dataValidacao: new Date(2026, 5, 20), doses: 250, valorRecebido: 7500 },
+      { vendaId: "v1", dataValidacao: new Date(2026, 5, 1), doses: 350, valorRecebido: 10500 },
     ];
     const resultado = calcularBonificacaoMetaDoses({ vendas, metaDoses, percentualSemMeta, percentualExcedente, bonusFixoValor });
 
     expect(resultado.bateuMeta).toBe(true);
     expect(resultado.dosesApuradas).toBe(600);
-    // 100 doses excedentes de 250 (R$7.500) => valor proporcional = 100/250 * 7500 = 3000
-    // comissão sobre excedente = 3000 * 10% = 300
+    // 100 doses de excedente no total (600-500), a R$30/dose = R$3.000; comissão = 10% = R$300
     expect(resultado.comissaoSobreExcedente).toBe(300);
     expect(resultado.valorTotal).toBe(4300);
-    // v1 (mais antiga) cabe inteira dentro da meta -> 0% excedente; v2 tem 100 de 250 doses excedentes -> 40%
-    expect(resultado.fracaoExcedentePorVenda["v1-antes"]).toBe(0);
-    expect(resultado.fracaoExcedentePorVenda["v2-depois"]).toBeCloseTo(0.4, 5);
+    // preço uniforme -> mesma fração de excedente (100/600) pras duas vendas, não 0%/40% como seria por ordem cronológica
+    expect(resultado.fracaoExcedentePorVenda.v1).toBeCloseTo(100 / 600, 5);
+    expect(resultado.fracaoExcedentePorVenda.v2).toBeCloseTo(100 / 600, 5);
+  });
+
+  it("rateia proporcionalmente à receita quando o preço por dose varia entre vendas — não por ordem cronológica", () => {
+    // venda A: preço baixo (R$10/dose), participação pequena na receita -> empresta pouco do limiar, quase tudo vira excedente
+    // venda B: preço alto (R$40/dose), participação grande na receita -> empresta muito do limiar, pouco vira excedente
+    const vendas: VendaParaMetaDoses[] = [
+      { vendaId: "a-preco-baixo", dataValidacao: new Date(2026, 5, 1), doses: 400, valorRecebido: 4000 }, // R$10/dose
+      { vendaId: "b-preco-alto", dataValidacao: new Date(2026, 5, 20), doses: 200, valorRecebido: 8000 }, // R$40/dose
+    ];
+    const resultado = calcularBonificacaoMetaDoses({ vendas, metaDoses, percentualSemMeta, percentualExcedente, bonusFixoValor });
+
+    expect(resultado.bateuMeta).toBe(true);
+    expect(resultado.dosesApuradas).toBe(600);
+    // participação receita: a=4000/12000=1/3, b=8000/12000=2/3
+    // doses emprestadas ao limiar (500): a=500/3=166.67, b=1000/3=333.33
+    // excedente: a=(400-166.67)*10=2333.33 | b=(200-333.33 -> negativo, trunca em 0)*40=0
+    // total excedente=2333.33, comissão=10%=233.33 — bem diferente do que FIFO (cronológico) daria
+    expect(resultado.comissaoSobreExcedente).toBeCloseTo(233.33, 2);
+    expect(resultado.fracaoExcedentePorVenda["b-preco-alto"]).toBe(0);
+    expect(resultado.fracaoExcedentePorVenda["a-preco-baixo"]).toBeCloseTo((400 - 500 / 3) / 400, 5);
   });
 
   it("soma múltiplas vendas para determinar se bate a meta", () => {
@@ -90,11 +110,12 @@ describe("calcularBonificacaoMetaDoses", () => {
     expect(resultado.bateuMeta).toBe(true);
     expect(resultado.dosesApuradas).toBe(1200);
     expect(resultado.bonusFixo).toBe(20000);
-    // as primeiras 1000 doses (v1 inteira) não geram comissão; as 200 doses de v2 são 100% excedente
-    expect(resultado.comissaoSobreExcedente).toBe(680); // 3400 * 20%
+    // preço uniforme (R$17/dose nas duas) -> 200 doses de excedente no total (1200-1000) a R$17 = R$3.400; comissão = 20% = R$680
+    expect(resultado.comissaoSobreExcedente).toBe(680);
     expect(resultado.valorTotal).toBe(20680);
-    expect(resultado.fracaoExcedentePorVenda.v1).toBe(0);
-    expect(resultado.fracaoExcedentePorVenda.v2).toBe(1);
+    // rateado proporcionalmente à receita (mesma fração pras duas, já que o preço por dose é igual), não 0%/100% por ordem cronológica
+    expect(resultado.fracaoExcedentePorVenda.v1).toBeCloseTo(200 / 1200, 5);
+    expect(resultado.fracaoExcedentePorVenda.v2).toBeCloseTo(200 / 1200, 5);
   });
 });
 
