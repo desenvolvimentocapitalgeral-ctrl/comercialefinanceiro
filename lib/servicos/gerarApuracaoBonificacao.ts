@@ -48,7 +48,16 @@ export async function calcularApuracaoBonificacao(
     // abaixo — regra.baseCiclo é ignorado aqui de propósito.
     const vendasNoCiclo = vendas
       .filter((v) => v.cicloId === cicloId)
-      .map((v) => ({ vendaId: v.id, dataValidacao: v.dataVenda, doses: v.dosesVendidas ?? 0, valorRecebido: Number(v.valorTotal) }));
+      .map((v) => ({
+        vendaId: v.id,
+        dataValidacao: v.dataVenda,
+        doses: v.dosesVendidas ?? 0,
+        // Comissão (diferente da meta em doses, que conta por venda) segue
+        // RECEBIMENTO: soma das baixas já registradas nas parcelas desta
+        // venda, nunca o valorTotal faturado — senão a comissão variável
+        // embutiria receita que o cliente ainda não pagou.
+        valorRecebido: v.parcelas.reduce((acc, p) => acc + p.baixas.reduce((a, b) => a + Number(b.valorRecebido), 0), 0),
+      }));
 
     metaValor = regra.metaQuantidadeDoses ?? 0;
     const resultado = calcularBonificacaoMetaDoses({
